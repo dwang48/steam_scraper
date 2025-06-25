@@ -1,0 +1,45 @@
+# Python相关
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Django相关
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+
+# 爬虫日志
+scraper.log
+scheduler.log
+
+# IDE相关
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统相关
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 其他
+*.sqlite
+.env
+node_modules/
+*.tmp
+*.temp 
