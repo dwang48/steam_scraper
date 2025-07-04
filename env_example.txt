@@ -1,0 +1,10 @@
+# SMTP 邮件配置
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your_email@gmail.com
+SMTP_PASS=your_app_password
+TO_EMAIL=recipient@example.com
+FROM_EMAIL=your_email@gmail.com
+
+# 可选：并发数配置
+MAX_WORKERS=32 

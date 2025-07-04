@@ -1,0 +1,4 @@
+type,name,steam_appid,developers,publishers,header_image,website,categories,genres,steam_url,detection_stage,api_response_type,discovery_date
+game,Public Unreleased Game,999999,Known Developer,Known Publisher,https://example.com/test.jpg,https://example.com,Action;Adventure,RPG;Simulation,https://store.steampowered.com/app/999999,public_unreleased,full_details,2025-07-04
+unknown,Early Stage App (ID: 999998),999998,,,,,,,https://store.steampowered.com/app/999998,early_stage,failed,2025-07-04
+game,Minimal Data Game,999997,,,,,,,https://store.steampowered.com/app/999997,minimal_data,full_details,2025-07-04
