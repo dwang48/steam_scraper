@@ -1,15 +1,19 @@
 {
-  "3658080": {
+  "6580803": {
     "first_detected": "2025-07-04",
     "last_checked": "2025-07-04",
     "status_history": [
       {
         "date": "2025-07-04",
         "status": "error"
+      },
+      {
+        "date": "2025-07-04",
+        "status": "failed"
       }
     ],
-    "check_count": 1,
-    "current_status": "error"
+    "check_count": 6,
+    "current_status": "failed"
   },
   "3765550": {
     "first_detected": "2025-07-04",
@@ -18,10 +22,16 @@
       {
         "date": "2025-07-04",
         "status": "error"
+      },
+      {
+        "date": "2025-07-04",
+        "status": "accessible"
       }
     ],
-    "check_count": 1,
-    "current_status": "error"
+    "check_count": 6,
+    "current_status": "accessible",
+    "latest_name": "DodgeShow-Generation2-Ionia\u2160",
+    "latest_type": "dlc"
   },
   "3851070": {
     "first_detected": "2025-07-04",
@@ -30,22 +40,16 @@
       {
         "date": "2025-07-04",
         "status": "error"
-      }
-    ],
-    "check_count": 1,
-    "current_status": "error"
-  },
-  "3850050": {
-    "first_detected": "2025-07-04",
-    "last_checked": "2025-07-04",
-    "status_history": [
+      },
       {
         "date": "2025-07-04",
-        "status": "error"
+        "status": "accessible"
       }
     ],
-    "check_count": 1,
-    "current_status": "error"
+    "check_count": 6,
+    "current_status": "accessible",
+    "latest_name": "Dhadoom! Demo",
+    "latest_type": "demo"
   },
   "3816320": {
     "first_detected": "2025-07-04",
@@ -54,57 +58,15 @@
       {
         "date": "2025-07-04",
         "status": "error"
-      }
-    ],
-    "check_count": 1,
-    "current_status": "error"
-  },
-  "3475770": {
-    "first_detected": "2025-07-04",
-    "last_checked": "2025-07-04",
-    "status_history": [
+      },
       {
         "date": "2025-07-04",
-        "status": "error"
+        "status": "accessible"
       }
     ],
-    "check_count": 1,
-    "current_status": "error"
-  },
-  "3752810": {
-    "first_detected": "2025-07-04",
-    "last_checked": "2025-07-04",
-    "status_history": [
-      {
-        "date": "2025-07-04",
-        "status": "error"
-      }
-    ],
-    "check_count": 1,
-    "current_status": "error"
-  },
-  "3857720": {
-    "first_detected": "2025-07-04",
-    "last_checked": "2025-07-04",
-    "status_history": [
-      {
-        "date": "2025-07-04",
-        "status": "error"
-      }
-    ],
-    "check_count": 1,
-    "current_status": "error"
-  },
-  "3801440": {
-    "first_detected": "2025-07-04",
-    "last_checked": "2025-07-04",
-    "status_history": [
-      {
-        "date": "2025-07-04",
-        "status": "error"
-      }
-    ],
-    "check_count": 1,
-    "current_status": "error"
+    "check_count": 6,
+    "current_status": "accessible",
+    "latest_name": "Loaders Playtest",
+    "latest_type": "game"
   }
 }

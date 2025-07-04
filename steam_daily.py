@@ -255,10 +255,6 @@ def send_email(csv_path: Path):
 • Minimal data apps: {minimal_data}
 • Total discoveries: {len(rows_data)}
 
-🎯 Business Value:
-Early-stage apps are prime targets for development partnerships as they likely represent games in pre-release development phases.
-
-The attached CSV contains all discoveries with detection stage indicators to help prioritize outreach efforts.
 """
                 msg.set_content(email_body)
                 
