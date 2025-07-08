@@ -4,12 +4,14 @@ import csv
 import smtplib
 import tempfile
 import argparse
+import re
 from datetime import datetime, timezone, timedelta
 from email.message import EmailMessage
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Set
 import logging
 from dateutil import parser as dateparser
+from difflib import SequenceMatcher
 
 import requests
 from dotenv import load_dotenv
@@ -23,6 +25,12 @@ EXPORT_DIR = Path(__file__).parent / "exports"
 KNOWN_APPS_FILE = DATA_DIR / "applist.json"
 WATCHLIST_FILE = DATA_DIR / "early_stage_watchlist.json"  # New file for tracking early-stage apps
 
+# Words that indicate different versions of the same game
+VERSION_SUFFIXES = {
+    "demo", "playtest", "beta", "alpha", "test", "trial", "preview",
+    "early access", "prologue", "chapter", "episode", "dlc", "expansion"
+}
+
 # Updated fields to include early-stage app detection
 FIELDS = [
     "type",
@@ -30,14 +38,17 @@ FIELDS = [
     "steam_appid",
     "developers",
     "publishers",
-    "header_image",
     "website",
     "categories",
     "genres",
     "steam_url",
     "detection_stage",  # New field: "public_unreleased", "early_stage", "minimal_data"
     "api_response_type",  # New field: "full_details", "minimal_data", "no_response"
-    "discovery_date"     # New field: when we first detected this app
+    "potential_duplicate",  # New field: indicates if this might be a duplicate/variant
+    "release_date",       # New field: game release date
+    "description",        # New field: game description for understanding gameplay
+    "supported_languages", # New field: supported languages list
+    "discovery_date"      # New field: when we first detected this app (moved to end)
 ]
 
 # Ensure directories exist
@@ -137,29 +148,138 @@ def fetch_app_details(appid: int) -> Dict:
         # Capture network/parsing errors too
         return {"_api_response": "error", "_app_id": appid, "_error": str(e)}
 
+def get_game_details(appid: int, session: requests.Session) -> Dict:
+    """
+    获取单个游戏的详细信息
+    """
+    try:
+        url = DETAILS_URL_TEMPLATE.format(appid=appid)
+        response = session.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if str(appid) in data and data[str(appid)]['success']:
+            game_data = data[str(appid)]['data']
+            
+            # 检查是否为游戏类型
+            if game_data.get('type') != 'game':
+                return None
+                
+            # 提取基本信息
+            name = game_data.get('name', '')
+            
+            # 提取发布日期
+            release_date = "未知"
+            release_date_info = game_data.get('release_date', {})
+            if release_date_info and not release_date_info.get('coming_soon', True):
+                release_date = release_date_info.get('date', '未知')
+            
+            # 提取游戏描述（短描述优先，如果没有则使用详细描述的前200字）
+            description = ""
+            if game_data.get('short_description'):
+                description = game_data.get('short_description', '')
+            elif game_data.get('detailed_description'):
+                # 移除HTML标签并截取前200字符
+                import re
+                detailed_desc = game_data.get('detailed_description', '')
+                clean_desc = re.sub(r'<[^>]+>', '', detailed_desc)
+                description = clean_desc[:200] + '...' if len(clean_desc) > 200 else clean_desc
+            
+            # 提取支持语言
+            supported_languages = []
+            if game_data.get('supported_languages'):
+                # Steam返回的语言是HTML格式，需要解析
+                import re
+                lang_text = game_data.get('supported_languages', '')
+                # 提取语言名称（移除HTML标签和额外说明）
+                languages = re.findall(r'>([^<]+)<', lang_text)
+                if not languages:
+                    # 如果没有找到HTML标签，可能是纯文本
+                    languages = [lang.strip() for lang in lang_text.split(',')]
+                supported_languages = [lang.strip() for lang in languages if lang.strip()]
+            
+            # 提取开发商和发行商
+            developers = game_data.get('developers', [])
+            publishers = game_data.get('publishers', [])
+            
+            # 提取Steam标签/分类
+            categories = []
+            if game_data.get('categories'):
+                categories = [cat.get('description', '') for cat in game_data.get('categories', [])]
+            
+            genres = []
+            if game_data.get('genres'):
+                genres = [genre.get('description', '') for genre in game_data.get('genres', [])]
+            
+            return {
+                'appid': appid,
+                'name': name,
+                'release_date': release_date,
+                'description': description,
+                'supported_languages': supported_languages,
+                'developers': developers,
+                'publishers': publishers,
+                'categories': categories,
+                'genres': genres,
+                'website': game_data.get('website'),
+                'steam_url': f"https://store.steampowered.com/app/{appid}/",
+                'retrieved_at': datetime.now(timezone.utc).isoformat()
+            }
+        
+        return None
+        
+    except Exception as e:
+        logging.error(f"获取游戏 {appid} 详情时出错: {e}")
+        return None
+
 def build_row(details: Dict, app_id: int = None) -> Dict:
     """Enhanced to capture early-stage apps with minimal data"""
     discovery_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     
-    # Handle apps with no API response or minimal data
-    if not details or details.get("_api_response") in ["failed", "error"]:
+    # Handle new data structure from get_game_details
+    if details and details.get('appid'):
+        # This is from the new get_game_details function
+        return {
+            "type": "game",
+            "name": details.get("name", ""),
+            "steam_appid": str(details.get("appid", "")),
+            "developers": ";".join(details.get("developers", [])) if details.get("developers") else None,
+            "publishers": ";".join(details.get("publishers", [])) if details.get("publishers") else None,
+            "website": details.get("website"),
+            "categories": ";".join(details.get("categories", [])) if details.get("categories") else None,
+            "genres": ";".join(details.get("genres", [])) if details.get("genres") else None,
+            "steam_url": details.get("steam_url", ""),
+            "detection_stage": "public_unreleased",  # Assuming these are unreleased games
+            "api_response_type": "full_details",
+            "potential_duplicate": False,
+            "release_date": details.get("release_date", "未知"),
+            "description": details.get("description", ""),
+            "supported_languages": ";".join(details.get("supported_languages", [])) if details.get("supported_languages") else None,
+            "discovery_date": discovery_date
+        }
+    
+    # Handle early-stage apps that only have minimal data
+    if details and details.get("_api_response") in ["failed", "error"]:
         return {
             "type": "unknown",
             "name": f"Early Stage App (ID: {app_id or details.get('_app_id', 'unknown')})",
             "steam_appid": str(app_id or details.get("_app_id", "")),
             "developers": None,
             "publishers": None,
-            "header_image": None,
             "website": None,
             "categories": None,
             "genres": None,
             "steam_url": f"https://store.steampowered.com/app/{app_id or details.get('_app_id', '')}" if app_id or details.get('_app_id') else None,
             "detection_stage": "early_stage",
             "api_response_type": details.get("_api_response", "no_response"),
+            "potential_duplicate": False,
+            "release_date": "未知",
+            "description": "",
+            "supported_languages": None,
             "discovery_date": discovery_date
         }
     
-    # Handle apps with full details
+    # Handle apps with full details (legacy data structure)
     name = details.get("name")
     if name:
         # Check if it's a released game we should skip
@@ -169,10 +289,39 @@ def build_row(details: Dict, app_id: int = None) -> Dict:
         
         # Include unreleased games with full store pages
         detection_stage = "public_unreleased" if release_info.get("coming_soon") else "minimal_data"
+        
+        # Extract release date from legacy structure
+        release_date = "未知"
+        if release_info and release_info.get("date"):
+            release_date = release_info.get("date")
+        
+        # Extract description from legacy structure
+        description = ""
+        if details.get("short_description"):
+            description = details.get("short_description")
+        elif details.get("detailed_description"):
+            import re
+            detailed_desc = details.get("detailed_description", "")
+            clean_desc = re.sub(r'<[^>]+>', '', detailed_desc)
+            description = clean_desc[:200] + '...' if len(clean_desc) > 200 else clean_desc
+        
+        # Extract supported languages from legacy structure
+        supported_languages = []
+        if details.get("supported_languages"):
+            import re
+            lang_text = details.get("supported_languages", "")
+            languages = re.findall(r'>([^<]+)<', lang_text)
+            if not languages:
+                languages = [lang.strip() for lang in lang_text.split(',')]
+            supported_languages = [lang.strip() for lang in languages if lang.strip()]
+        
     else:
         # Apps without names are likely very early stage
         detection_stage = "minimal_data"
         name = f"Unnamed App (ID: {details.get('steam_appid', app_id or 'unknown')})"
+        release_date = "未知"
+        description = ""
+        supported_languages = []
     
     return {
         "type": details.get("type", "unknown"),
@@ -180,13 +329,16 @@ def build_row(details: Dict, app_id: int = None) -> Dict:
         "steam_appid": str(details.get("steam_appid", app_id or "")),
         "developers": ";".join(details.get("developers", [])) if details.get("developers") else None,
         "publishers": ";".join(details.get("publishers", [])) if details.get("publishers") else None,
-        "header_image": details.get("header_image"),
         "website": details.get("website"),
         "categories": ";".join(c.get("description") for c in details.get("categories", [])) if details.get("categories") else None,
         "genres": ";".join(g.get("description") for g in details.get("genres", [])) if details.get("genres") else None,
         "steam_url": f"https://store.steampowered.com/app/{details.get('steam_appid', app_id or '')}" if details.get('steam_appid') or app_id else None,
         "detection_stage": detection_stage,
         "api_response_type": "full_details",
+        "potential_duplicate": False,
+        "release_date": release_date,
+        "description": description,
+        "supported_languages": ";".join(supported_languages) if supported_languages else None,
         "discovery_date": discovery_date
     }
 
@@ -288,13 +440,16 @@ def create_test_csv() -> Path:
             "steam_appid": "999999",
             "developers": "Known Developer",
             "publishers": "Known Publisher", 
-            "header_image": "https://example.com/test.jpg",
             "website": "https://example.com",
             "categories": "Action;Adventure",
             "genres": "RPG;Simulation",
             "steam_url": "https://store.steampowered.com/app/999999",
             "detection_stage": "public_unreleased",
             "api_response_type": "full_details",
+            "potential_duplicate": False,
+            "release_date": "2025-12-31",
+            "description": "An exciting RPG adventure with stunning visuals and immersive gameplay.",
+            "supported_languages": "English;Chinese;Japanese;Korean",
             "discovery_date": datetime.now(timezone.utc).strftime("%Y-%m-%d")
         },
         {
@@ -303,13 +458,16 @@ def create_test_csv() -> Path:
             "steam_appid": "999998",
             "developers": None,
             "publishers": None,
-            "header_image": None, 
             "website": None,
             "categories": None,
             "genres": None,
             "steam_url": "https://store.steampowered.com/app/999998",
             "detection_stage": "early_stage",
             "api_response_type": "failed",
+            "potential_duplicate": False,
+            "release_date": "未知",
+            "description": "",
+            "supported_languages": None,
             "discovery_date": datetime.now(timezone.utc).strftime("%Y-%m-%d")
         },
         {
@@ -318,13 +476,16 @@ def create_test_csv() -> Path:
             "steam_appid": "999997",
             "developers": None,
             "publishers": None,
-            "header_image": None,
             "website": None,
             "categories": None,
             "genres": None,
             "steam_url": "https://store.steampowered.com/app/999997",
             "detection_stage": "minimal_data",
             "api_response_type": "full_details",
+            "potential_duplicate": False,
+            "release_date": "2025-06-15",
+            "description": "A mysterious game with limited information available.",
+            "supported_languages": "English",
             "discovery_date": datetime.now(timezone.utc).strftime("%Y-%m-%d")
         }
     ]
@@ -336,6 +497,94 @@ def create_test_csv() -> Path:
             writer.writerow(row)
     
     return file_path
+
+def normalize_game_name(name: str) -> str:
+    """Normalize game name for similarity comparison"""
+    if not name:
+        return ""
+    
+    # Convert to lowercase
+    normalized = name.lower().strip()
+    
+    # Remove common punctuation and special characters
+    normalized = re.sub(r'[™®©]', '', normalized)
+    normalized = re.sub(r'[:\-–—_]', ' ', normalized)
+    normalized = re.sub(r'[^\w\s]', '', normalized)
+    
+    # Remove common version indicators
+    for suffix in VERSION_SUFFIXES:
+        # Remove suffix at the end of the name
+        pattern = rf'\b{re.escape(suffix)}\b\s*$'
+        normalized = re.sub(pattern, '', normalized, flags=re.IGNORECASE)
+        
+        # Remove suffix in parentheses
+        pattern = rf'\s*\(\s*{re.escape(suffix)}\s*\)\s*'
+        normalized = re.sub(pattern, ' ', normalized, flags=re.IGNORECASE)
+    
+    # Clean up extra whitespace
+    normalized = ' '.join(normalized.split())
+    
+    return normalized
+
+def calculate_name_similarity(name1: str, name2: str) -> float:
+    """Calculate similarity between two game names (0.0 to 1.0)"""
+    if not name1 or not name2:
+        return 0.0
+    
+    # Normalize both names
+    norm1 = normalize_game_name(name1)
+    norm2 = normalize_game_name(name2)
+    
+    if not norm1 or not norm2:
+        return 0.0
+    
+    # Use SequenceMatcher for similarity calculation
+    return SequenceMatcher(None, norm1, norm2).ratio()
+
+def find_similar_games(new_name: str, existing_games: List[Dict], threshold: float = 0.85) -> List[Dict]:
+    """Find games with similar names in the existing list"""
+    similar_games = []
+    
+    for game in existing_games:
+        existing_name = game.get("name", "")
+        similarity = calculate_name_similarity(new_name, existing_name)
+        
+        if similarity >= threshold:
+            similar_games.append({
+                "game": game,
+                "similarity": similarity,
+                "normalized_new": normalize_game_name(new_name),
+                "normalized_existing": normalize_game_name(existing_name)
+            })
+    
+    # Sort by similarity (highest first)
+    similar_games.sort(key=lambda x: x["similarity"], reverse=True)
+    return similar_games
+
+def check_developer_match(new_developers: List[str], existing_developers: List[str]) -> bool:
+    """Check if developers match between two games"""
+    if not new_developers or not existing_developers:
+        return False
+    
+    # Convert to sets for comparison (case insensitive)
+    new_devs = {dev.lower().strip() for dev in new_developers if dev}
+    existing_devs = {dev.lower().strip() for dev in existing_developers if dev}
+    
+    # Check if there's any overlap
+    return bool(new_devs.intersection(existing_devs))
+
+def get_version_type(name: str) -> str:
+    """Determine what type of version this game is (demo, beta, etc.)"""
+    if not name:
+        return "main"
+    
+    name_lower = name.lower()
+    
+    for suffix in VERSION_SUFFIXES:
+        if suffix in name_lower:
+            return suffix
+    
+    return "main"
 
 def main():
     # Parse command line arguments
