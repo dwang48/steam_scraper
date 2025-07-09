@@ -12,6 +12,8 @@ from typing import List, Dict, Set
 import logging
 from dateutil import parser as dateparser
 from difflib import SequenceMatcher
+from xml.etree import ElementTree as ET
+import time
 
 import requests
 from dotenv import load_dotenv
@@ -20,6 +22,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # Constants
 APPLIST_URL = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
 DETAILS_URL_TEMPLATE = "https://store.steampowered.com/api/appdetails?appids={appid}&cc=us&l=en"
+FOLLOWER_URL = "https://steamcommunity.com/games/{appid}/memberslistxml/?xml=1"
+STEAMDB_URL = "https://steamdb.info/app/{appid}/"
 DATA_DIR = Path(__file__).parent / "steam_data"
 EXPORT_DIR = Path(__file__).parent / "exports"
 KNOWN_APPS_FILE = DATA_DIR / "applist.json"
@@ -31,7 +35,35 @@ VERSION_SUFFIXES = {
     "early access", "prologue", "chapter", "episode", "dlc", "expansion"
 }
 
-# Updated fields to include early-stage app detection
+# Genre-based wishlist multipliers (followers * multiplier = estimated wishlists)
+GENRE_MULTIPLIER = {
+    # 深度策略类：更低倍数
+    "4x": 9, 
+    "turn-based strategy": 9, 
+    "survival": 9.5,
+    "grand strategy": 9,
+    "city builder": 9.5,
+    # 叙事/休闲类：更高倍数
+    "story rich": 13,
+    "story-rich": 13, 
+    "relaxing": 15, 
+    "puzzle": 16,
+    "visual novel": 14,
+    "dating sim": 15,
+    # 中等倍数
+    "action": 11,
+    "adventure": 12,
+    "rpg": 11,
+    "simulation": 10,
+    "strategy": 10,
+    "indie": 12,
+    "casual": 14
+}
+
+# 正则表达式匹配SteamDB愿望单排名
+WISHLIST_RE = re.compile(r'#\s*(\d+)\s+in wishlists')
+
+# Updated fields to include wishlist estimation
 FIELDS = [
     "type",
     "name",
@@ -48,6 +80,9 @@ FIELDS = [
     "release_date",       # New field: game release date
     "description",        # New field: game description for understanding gameplay
     "supported_languages", # New field: supported languages list
+    "followers",          # New field: Steam community followers count
+    "wishlists_est",      # New field: estimated wishlist count
+    "wishlist_rank",      # New field: SteamDB wishlist ranking
     "discovery_date"      # New field: when we first detected this app (moved to end)
 ]
 
@@ -148,6 +183,86 @@ def fetch_app_details(appid: int) -> Dict:
         # Capture network/parsing errors too
         return {"_api_response": "error", "_app_id": appid, "_error": str(e)}
 
+def fetch_follower_count(appid: int, session: requests.Session = None) -> int | None:
+    """获取Steam社区关注者数量"""
+    sess = session or requests.Session()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (FollowerBot/1.0)",
+        "Cookie": "birthtime=0"   # 绕过年龄墙
+    }
+    try:
+        resp = sess.get(FOLLOWER_URL.format(appid=appid), headers=headers, timeout=15)
+        resp.raise_for_status()
+        xml_root = ET.fromstring(resp.text)
+        member_tag = xml_root.find("./groupDetails/memberCount")
+        return int(member_tag.text) if member_tag is not None else None
+    except Exception as e:
+        logging.warning("Follower fetch failed for %s: %s", appid, e)
+        return None
+
+def estimate_wishlists(followers: int, genres: list[str] | None = None) -> int:
+    """基于关注者数和游戏类型估算愿望单数量"""
+    base = 12       # 全站中位数
+    if genres:
+        for genre in genres:
+            genre_lower = genre.lower()
+            if genre_lower in GENRE_MULTIPLIER:
+                base = GENRE_MULTIPLIER[genre_lower]
+                break
+    return int(followers * base) if followers else 0
+
+def fetch_wishlist_rank(appid: int, session: requests.Session = None) -> int | None:
+    """获取SteamDB愿望单排名"""
+    sess = session or requests.Session()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (SteamDBBot/1.0)"
+    }
+    try:
+        url = STEAMDB_URL.format(appid=appid)
+        resp = sess.get(url, headers=headers, timeout=15)
+        resp.raise_for_status()
+        m = WISHLIST_RE.search(resp.text)
+        return int(m.group(1)) if m else None
+    except Exception as e:
+        logging.warning("Wishlist rank fetch failed for %s: %s", appid, e)
+        return None
+
+def fetch_wishlist_data(appid: int, details: Dict = None, session: requests.Session = None) -> Dict:
+    """获取完整的愿望单估算数据"""
+    sess = session or requests.Session()
+    
+    # 获取关注者数
+    followers = fetch_follower_count(appid, sess)
+    
+    # 如果有关注者数据，估算愿望单
+    wishlists_est = None
+    if followers is not None:
+        # 提取游戏类型用于估算
+        genres = []
+        if details:
+            if details.get('genres'):
+                # 处理新数据结构
+                if isinstance(details['genres'], list) and all(isinstance(g, str) for g in details['genres']):
+                    genres = details['genres']
+                # 处理旧数据结构
+                elif isinstance(details['genres'], list) and all(isinstance(g, dict) for g in details['genres']):
+                    genres = [g.get('description', '') for g in details['genres']]
+        
+        wishlists_est = estimate_wishlists(followers, genres)
+    
+    # 获取SteamDB排名（可选，因为只有热门游戏才有排名）
+    wishlist_rank = None
+    if followers and followers > 100:  # 只有一定关注者的游戏才尝试获取排名
+        # 添加延时避免请求过于频繁
+        time.sleep(0.5)
+        wishlist_rank = fetch_wishlist_rank(appid, sess)
+    
+    return {
+        "followers": followers,
+        "wishlists_est": wishlists_est,
+        "wishlist_rank": wishlist_rank
+    }
+
 def get_game_details(appid: int, session: requests.Session) -> Dict:
     """
     获取单个游戏的详细信息
@@ -232,9 +347,14 @@ def get_game_details(appid: int, session: requests.Session) -> Dict:
         logging.error(f"获取游戏 {appid} 详情时出错: {e}")
         return None
 
-def build_row(details: Dict, app_id: int = None) -> Dict:
-    """Enhanced to capture early-stage apps with minimal data"""
+def build_row(details: Dict, app_id: int = None, wishlist_data: Dict = None) -> Dict:
+    """Enhanced to capture early-stage apps with minimal data and wishlist estimation"""
     discovery_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    # Extract wishlist data if provided
+    followers = wishlist_data.get("followers") if wishlist_data else None
+    wishlists_est = wishlist_data.get("wishlists_est") if wishlist_data else None
+    wishlist_rank = wishlist_data.get("wishlist_rank") if wishlist_data else None
     
     # Handle new data structure from get_game_details
     if details and details.get('appid'):
@@ -255,6 +375,9 @@ def build_row(details: Dict, app_id: int = None) -> Dict:
             "release_date": details.get("release_date", "未知"),
             "description": details.get("description", ""),
             "supported_languages": ";".join(details.get("supported_languages", [])) if details.get("supported_languages") else None,
+            "followers": followers,
+            "wishlists_est": wishlists_est,
+            "wishlist_rank": wishlist_rank,
             "discovery_date": discovery_date
         }
     
@@ -276,6 +399,9 @@ def build_row(details: Dict, app_id: int = None) -> Dict:
             "release_date": "未知",
             "description": "",
             "supported_languages": None,
+            "followers": followers,
+            "wishlists_est": wishlists_est,
+            "wishlist_rank": wishlist_rank,
             "discovery_date": discovery_date
         }
     
@@ -339,6 +465,9 @@ def build_row(details: Dict, app_id: int = None) -> Dict:
         "release_date": release_date,
         "description": description,
         "supported_languages": ";".join(supported_languages) if supported_languages else None,
+        "followers": followers,
+        "wishlists_est": wishlists_est,
+        "wishlist_rank": wishlist_rank,
         "discovery_date": discovery_date
     }
 
@@ -399,6 +528,11 @@ def send_email(csv_path: Path):
                 public_unreleased = sum(1 for row in rows_data if row.get('detection_stage') == 'public_unreleased') 
                 minimal_data = sum(1 for row in rows_data if row.get('detection_stage') == 'minimal_data')
                 
+                # Calculate wishlist statistics
+                total_followers = sum(int(row.get('followers', 0) or 0) for row in rows_data)
+                total_wishlists_est = sum(int(row.get('wishlists_est', 0) or 0) for row in rows_data)
+                apps_with_rank = sum(1 for row in rows_data if row.get('wishlist_rank'))
+                
                 email_body = f"""New Steam app discoveries for {date_str}:
 
 📊 Discovery Summary:
@@ -406,6 +540,11 @@ def send_email(csv_path: Path):
 • Public unreleased games: {public_unreleased}  
 • Minimal data apps: {minimal_data}
 • Total discoveries: {len(rows_data)}
+
+📈 Wishlist Analytics:
+• Total followers across all games: {total_followers:,}
+• Estimated total wishlists: {total_wishlists_est:,}
+• Games with SteamDB wishlist ranking: {apps_with_rank}
 
 """
                 msg.set_content(email_body)
@@ -450,6 +589,9 @@ def create_test_csv() -> Path:
             "release_date": "2025-12-31",
             "description": "An exciting RPG adventure with stunning visuals and immersive gameplay.",
             "supported_languages": "English;Chinese;Japanese;Korean",
+            "followers": 2500,
+            "wishlists_est": 27500,  # 2500 * 11 (RPG multiplier)
+            "wishlist_rank": 1250,
             "discovery_date": datetime.now(timezone.utc).strftime("%Y-%m-%d")
         },
         {
@@ -468,6 +610,9 @@ def create_test_csv() -> Path:
             "release_date": "未知",
             "description": "",
             "supported_languages": None,
+            "followers": None,
+            "wishlists_est": None,
+            "wishlist_rank": None,
             "discovery_date": datetime.now(timezone.utc).strftime("%Y-%m-%d")
         },
         {
@@ -486,6 +631,9 @@ def create_test_csv() -> Path:
             "release_date": "2025-06-15",
             "description": "A mysterious game with limited information available.",
             "supported_languages": "English",
+            "followers": 85,
+            "wishlists_est": 1020,  # 85 * 12 (default multiplier)
+            "wishlist_rank": None,  # 关注者太少，没有排名
             "discovery_date": datetime.now(timezone.utc).strftime("%Y-%m-%d")
         }
     ]
@@ -624,11 +772,14 @@ def main():
                 
                 # Determine new status
                 if details and details.get("_api_response") == "success" and details.get("name"):
-                    # App became accessible!
-                    row = build_row(details, aid_int)
+                    # App became accessible! Fetch wishlist data too
+                    wishlist_data = fetch_wishlist_data(aid_int, details)
+                    row = build_row(details, aid_int, wishlist_data)
                     if row:
                         watchlist_promotions.append((aid_int, details, row))
-                        logger.info("🎉 Watchlist app %s became accessible: %s", aid_int, details.get("name"))
+                        logger.info("🎉 Watchlist app %s became accessible: %s (followers: %s, est. wishlists: %s)", 
+                                  aid_int, details.get("name"), 
+                                  wishlist_data.get("followers"), wishlist_data.get("wishlists_est"))
                     # Update watchlist entry
                     update_watchlist_entry(watchlist, aid_int, "accessible", details)
                 else:
@@ -658,7 +809,12 @@ def main():
     new_to_watchlist = 0
     
     def _task(aid):
-        return aid, fetch_app_details(aid)
+        details = fetch_app_details(aid)
+        # 只为有成功响应的应用获取wishlist数据
+        wishlist_data = None
+        if details and details.get("_api_response") == "success" and details.get("name"):
+            wishlist_data = fetch_wishlist_data(aid, details)
+        return aid, details, wishlist_data
 
     early_stage_count = 0
     public_unreleased_count = 0
@@ -669,8 +825,8 @@ def main():
         futures = {exe.submit(_task, aid): aid for aid in new_ids}
         for idx, fut in enumerate(as_completed(futures), start=1):
             total_fetched += 1
-            aid, details = fut.result()
-            row = build_row(details, aid)
+            aid, details, wishlist_data = fut.result()
+            row = build_row(details, aid, wishlist_data)
             
             if not row and details:  # Details exist but filtered by date (released games)
                 already_released_filtered += 1
