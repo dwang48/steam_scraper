@@ -14,6 +14,7 @@ from dateutil import parser as dateparser
 from difflib import SequenceMatcher
 from xml.etree import ElementTree as ET
 import time
+import html
 
 import requests
 from dotenv import load_dotenv
@@ -227,6 +228,25 @@ def fetch_wishlist_rank(appid: int, session: requests.Session = None) -> int | N
         logging.warning("Wishlist rank fetch failed for %s: %s", appid, e)
         return None
 
+def clean_text_content(text: str) -> str:
+    """清理文本内容：解码HTML实体，移除HTML标签，规范化空白字符"""
+    if not text:
+        return ""
+    
+    # 解码HTML实体 (如 &quot; -> ", &amp; -> &, &lt; -> <, &gt; -> >)
+    text = html.unescape(text)
+    
+    # 移除HTML标签
+    text = re.sub(r'<[^>]+>', '', text)
+    
+    # 规范化空白字符：将多个连续空白字符（包括换行、制表符）替换为单个空格
+    text = re.sub(r'\s+', ' ', text)
+    
+    # 移除首尾空白
+    text = text.strip()
+    
+    return text
+
 def fetch_wishlist_data(appid: int, details: Dict = None, session: requests.Session = None) -> Dict:
     """获取完整的愿望单估算数据"""
     sess = session or requests.Session()
@@ -292,12 +312,11 @@ def get_game_details(appid: int, session: requests.Session) -> Dict:
             # 提取游戏描述（短描述优先，如果没有则使用详细描述的前200字）
             description = ""
             if game_data.get('short_description'):
-                description = game_data.get('short_description', '')
+                description = clean_text_content(game_data.get('short_description', ''))
             elif game_data.get('detailed_description'):
-                # 移除HTML标签并截取前200字符
-                import re
+                # 清理HTML内容并截取前200字符
                 detailed_desc = game_data.get('detailed_description', '')
-                clean_desc = re.sub(r'<[^>]+>', '', detailed_desc)
+                clean_desc = clean_text_content(detailed_desc)
                 description = clean_desc[:200] + '...' if len(clean_desc) > 200 else clean_desc
             
             # 提取支持语言
@@ -424,11 +443,10 @@ def build_row(details: Dict, app_id: int = None, wishlist_data: Dict = None) -> 
         # Extract description from legacy structure
         description = ""
         if details.get("short_description"):
-            description = details.get("short_description")
+            description = clean_text_content(details.get("short_description"))
         elif details.get("detailed_description"):
-            import re
             detailed_desc = details.get("detailed_description", "")
-            clean_desc = re.sub(r'<[^>]+>', '', detailed_desc)
+            clean_desc = clean_text_content(detailed_desc)
             description = clean_desc[:200] + '...' if len(clean_desc) > 200 else clean_desc
         
         # Extract supported languages from legacy structure
@@ -474,11 +492,24 @@ def build_row(details: Dict, app_id: int = None, wishlist_data: Dict = None) -> 
 def export_csv(rows: List[Dict]) -> Path:
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     file_path = EXPORT_DIR / f"new_games_{today_str}.csv"
-    with file_path.open("w", encoding="utf-8", newline="") as f:
+    
+    # 使用utf-8-sig编码确保Windows正确显示中文（添加BOM头）
+    with file_path.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDS)
         writer.writeheader()
         for row in rows:
-            writer.writerow(row)
+            # 清理行数据中的文本字段
+            cleaned_row = {}
+            for key, value in row.items():
+                if isinstance(value, str) and value:
+                    # 对可能包含HTML实体的字段进行额外清理
+                    if key in ['name', 'description', 'developers', 'publishers', 'categories', 'genres']:
+                        cleaned_row[key] = clean_text_content(value)
+                    else:
+                        cleaned_row[key] = value
+                else:
+                    cleaned_row[key] = value
+            writer.writerow(cleaned_row)
     return file_path
 
 def send_email(csv_path: Path):
@@ -638,7 +669,7 @@ def create_test_csv() -> Path:
         }
     ]
     
-    with file_path.open("w", encoding="utf-8", newline="") as f:
+    with file_path.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDS)
         writer.writeheader()
         for row in test_data:
