@@ -8,7 +8,7 @@ import re
 from datetime import datetime, timezone, timedelta
 from email.message import EmailMessage
 from pathlib import Path
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Optional
 import logging
 from dateutil import parser as dateparser
 from difflib import SequenceMatcher
@@ -184,7 +184,7 @@ def fetch_app_details(appid: int) -> Dict:
         # Capture network/parsing errors too
         return {"_api_response": "error", "_app_id": appid, "_error": str(e)}
 
-def fetch_follower_count(appid: int, session: requests.Session = None) -> int | None:
+def fetch_follower_count(appid: int, session: requests.Session = None) -> Optional[int]:
     """获取Steam社区关注者数量"""
     sess = session or requests.Session()
     headers = {
@@ -201,7 +201,7 @@ def fetch_follower_count(appid: int, session: requests.Session = None) -> int | 
         logging.warning("Follower fetch failed for %s: %s", appid, e)
         return None
 
-def estimate_wishlists(followers: int, genres: list[str] | None = None) -> int:
+def estimate_wishlists(followers: int, genres: Optional[List[str]] = None) -> int:
     """基于关注者数和游戏类型估算愿望单数量"""
     base = 12       # 全站中位数
     if genres:
