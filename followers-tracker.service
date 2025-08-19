@@ -1,0 +1,24 @@
+[Unit]
+Description=Game Followers Tracking System
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/steam_scraper
+ExecStart=/usr/bin/python3 /home/ubuntu/steam_scraper/schedule_followers_tracking.py
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+# 环境变量文件
+EnvironmentFile=/home/ubuntu/steam_scraper/.env
+
+# 日志配置
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=followers-tracker
+
+[Install]
+WantedBy=multi-user.target 
