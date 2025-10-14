@@ -1,0 +1,4 @@
+﻿type,name,steam_appid,developers,publishers,website,categories,genres,steam_url,detection_stage,api_response_type,potential_duplicate,release_date,description,supported_languages,followers,wishlists_est,wishlist_rank,discovery_date
+game,Public Unreleased Game,999999,Known Developer,Known Publisher,https://example.com,Action;Adventure,RPG;Simulation,https://store.steampowered.com/app/999999,public_unreleased,full_details,False,2025-12-31,An exciting RPG adventure with stunning visuals and immersive gameplay.,English;Chinese;Japanese;Korean,2500,27500,1250,2025-07-09
+unknown,Early Stage App (ID: 999998),999998,,,,,,https://store.steampowered.com/app/999998,early_stage,failed,False,未知,,,,,,2025-07-09
+game,Minimal Data Game,999997,,,,,,https://store.steampowered.com/app/999997,minimal_data,full_details,False,2025-06-15,A mysterious game with limited information available.,English,85,1020,,2025-07-09
