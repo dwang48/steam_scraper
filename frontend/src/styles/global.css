@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark light;
+}
+
+body {
+  background: radial-gradient(circle at top, rgba(245, 245, 247, 0.06), transparent 60%), #0b0b0c;
+  min-height: 100vh;
+}
+
+.glass-panel {
+  @apply bg-ink-subtle/60 backdrop-blur-2xl border border-white/5 rounded-3xl shadow-glass;
+}
+
+.card-gradient {
+  background: linear-gradient(135deg, rgba(245, 245, 247, 0.25), rgba(25, 25, 28, 0.9));
+}
