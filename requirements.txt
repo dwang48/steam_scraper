@@ -5,9 +5,8 @@ lxml>=4.9.0
 pandas>=2.2.0
 python-dotenv>=1.0.1
 python-dateutil>=2.8.2
-<<<<<<< HEAD
-mysql-connector-python>=8.0.33
-xlsxwriter>=3.1.0 
-=======
 mysql-connector-python>=8.0.33 
->>>>>>> 430f18fa363880b88dd13aa13a1d5ec2b5200e36
+xlsxwriter>=3.1.0
+Django>=5.1
+django-environ>=0.11.2
+djangorestframework>=3.15.2

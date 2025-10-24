@@ -35,8 +35,12 @@ Thumbs.db
 *.sqlite
 .env
 node_modules/
+frontend/node_modules/
+frontend/dist/
 *.tmp
 *.temp 
 
 exports/
 progress/
+*.csv
+*.json

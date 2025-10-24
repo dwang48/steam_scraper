@@ -7,4 +7,7 @@ TO_EMAIL=recipient@example.com
 FROM_EMAIL=your_email@gmail.com
 
 # 可选：并发数配置
-MAX_WORKERS=32 
+MAX_WORKERS=32
+
+# Feishu 推送配置（可选）
+FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/your_webhook_token
