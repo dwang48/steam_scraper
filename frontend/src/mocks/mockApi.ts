@@ -1,9 +1,29 @@
 // Mock API服务 - 用于demo模式
-import { PaginatedResponse, GameSnapshot, SwipePayload, SwipeResponse } from "../types";
-import { mockApiResponse, mockSnapshots } from "./mockData";
+import {
+  PaginatedResponse,
+  GameSnapshot,
+  SwipePayload,
+  SwipeResponse,
+  CurrentUser,
+  LoginPayload,
+  RegisterPayload
+} from "../types";
+import { mockSnapshots } from "./mockData";
 
 // 模拟网络延迟
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const demoUser: CurrentUser = {
+  id: 1,
+  username: "demo",
+  email: "demo@example.com",
+  first_name: "Demo",
+  last_name: "User",
+  display_name: "Demo User",
+  is_authenticated: true
+};
+
+let mockSignedIn = true;
 
 // Mock游戏列表API
 export async function mockListSnapshots(path: string): Promise<PaginatedResponse<GameSnapshot>> {
@@ -83,14 +103,45 @@ export async function mockPing(): Promise<{ status: string }> {
   return { status: "ok" };
 }
 
+// Mock当前用户信息
+export async function mockCurrentUser(): Promise<CurrentUser> {
+  await delay(120);
+  return mockSignedIn ? demoUser : { is_authenticated: false };
+}
+
+export async function mockLogin(_payload: LoginPayload): Promise<CurrentUser> {
+  await delay(200);
+  mockSignedIn = true;
+  return demoUser;
+}
+
+export async function mockRegister(payload: RegisterPayload): Promise<CurrentUser> {
+  await delay(300);
+  mockSignedIn = true;
+  return {
+    ...demoUser,
+    username: payload.username,
+    email: payload.email,
+    first_name: payload.first_name || demoUser.first_name,
+    last_name: payload.last_name || demoUser.last_name
+  };
+}
+
+export async function mockLogout(): Promise<CurrentUser> {
+  await delay(150);
+  mockSignedIn = false;
+  return { is_authenticated: false };
+}
+
 // Mock API对象
 export const mockApi = {
   listSnapshots: mockListSnapshots,
   createSwipe: mockCreateSwipe,
-  ping: mockPing
+  ping: mockPing,
+  currentUser: mockCurrentUser,
+  login: mockLogin,
+  register: mockRegister,
+  logout: mockLogout
 };
-
-
-
 
 

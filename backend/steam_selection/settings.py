@@ -22,12 +22,14 @@ ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["*"] if DEBUG else [])
 
 # Applications
 INSTALLED_APPS = [
+    "simpleui",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "corsheaders",
     "rest_framework",
     "core",
 ]
@@ -35,6 +37,7 @@ INSTALLED_APPS = [
 # Middleware
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -56,6 +59,9 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+            ],
+            "builtins": [
+                "core.templatetags.compat_filters",
             ],
         },
     },
@@ -108,6 +114,32 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.LimitOffsetPagination",
     "PAGE_SIZE": 200,
 }
+
+# CORS配置 - 用于前后端分离部署
+CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[
+    "http://localhost:5173",  # Vite开发服务器默认端口
+    "http://localhost:3000",  # 其他常见前端端口
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+])
+
+CORS_ALLOW_CREDENTIALS = True  # 允许携带cookie（用于session认证）
+
+# CSRF配置 - 信任的来源
+CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+])
+
+# Session配置
+SESSION_COOKIE_SAMESITE = "Lax"  # CSRF保护
+SESSION_COOKIE_HTTPONLY = True  # 防止XSS攻击
+SESSION_COOKIE_SECURE = not DEBUG  # 生产环境使用HTTPS
+CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_HTTPONLY = False  # 前端需要读取CSRF token
+CSRF_COOKIE_SECURE = not DEBUG
 
 # Integrations
 FEISHU_WEBHOOK_URL = env("FEISHU_WEBHOOK_URL", default="")

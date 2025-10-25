@@ -23,7 +23,7 @@ export function useGameFeed(params: UseGameFeedParams) {
 
   const { data, error, isLoading, mutate } = useSWR<PaginatedResponse<GameSnapshot>>(
     `/games/${query}`,
-    api.listSnapshots
+    (path: string) => api.listSnapshots(path) as Promise<PaginatedResponse<GameSnapshot>>
   );
 
   return {

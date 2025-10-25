@@ -189,3 +189,32 @@ class WishlistMomentum(models.Model):
 
     def __str__(self) -> str:
         return f"Momentum {self.game} [{self.window}] @ {self.calc_date:%Y-%m-%d}"
+
+
+class DailyGameEngagement(models.Model):
+    """
+    Aggregated swipe actions per game per day.
+    Used to build 'most liked' lists and daily reports.
+    """
+
+    game = models.ForeignKey(Game, related_name="daily_engagements", on_delete=models.CASCADE)
+    summary_date = models.DateField(help_text="Business date (UTC) the engagement was recorded for.")
+    likes = models.PositiveIntegerField(default=0)
+    skips = models.PositiveIntegerField(default=0)
+    watchlists = models.PositiveIntegerField(default=0)
+    unique_likers = models.PositiveIntegerField(default=0)
+    unique_skeptics = models.PositiveIntegerField(default=0)
+    total_actions = models.PositiveIntegerField(default=0)
+    computed_at = models.DateTimeField(auto_now_add=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-summary_date", "-likes", "game__name"]
+        unique_together = ("game", "summary_date")
+        indexes = [
+            models.Index(fields=["summary_date", "-likes"]),
+            models.Index(fields=["summary_date", "-total_actions"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.summary_date}: {self.game} ({self.likes} likes)"

@@ -40,3 +40,11 @@ class SwipeActionAdmin(admin.ModelAdmin):
     list_filter = ("action", "created_at")
     search_fields = ("game__name", "game__steam_appid", "user__username")
     ordering = ("-created_at",)
+
+
+@admin.register(models.DailyGameEngagement)
+class DailyGameEngagementAdmin(admin.ModelAdmin):
+    list_display = ("summary_date", "game", "likes", "skips", "watchlists", "unique_likers", "total_actions")
+    list_filter = ("summary_date",)
+    search_fields = ("game__name", "game__steam_appid")
+    ordering = ("-summary_date", "-likes")

@@ -111,7 +111,8 @@ class Command(BaseCommand):
         min_baseline: int,
         dry_run: bool,
     ) -> None:
-        start_date = calc_date - timedelta(days=window_days)
+        window_span = max(window_days - 1, 0)
+        start_date = calc_date - timedelta(days=window_span)
         snapshots = (
             models.GameSnapshot.objects.select_related("game")
             .filter(ingested_for_date__range=(start_date, calc_date))

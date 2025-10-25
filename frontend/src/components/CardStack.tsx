@@ -8,7 +8,7 @@ interface CardStackProps {
   snapshots: GameSnapshot[];
   activeIndex: number;
   onActiveIndexChange: (nextIndex: number) => void;
-  onSwipe: (snapshot: GameSnapshot, action: SwipeActionType) => void;
+  onSwipe: (snapshot: GameSnapshot, action: SwipeActionType) => Promise<boolean> | boolean;
   onOpenDetails: (snapshot: GameSnapshot) => void;
 }
 
@@ -16,6 +16,7 @@ const SWIPE_THRESHOLD = 120;
 
 export function CardStack({ snapshots, activeIndex, onActiveIndexChange, onSwipe, onOpenDetails }: CardStackProps) {
   const [direction, setDirection] = useState<"left" | "right" | null>(null);
+  const [isProcessing, setProcessing] = useState(false);
 
   const activeSnapshot = snapshots[activeIndex];
 
@@ -26,17 +27,30 @@ export function CardStack({ snapshots, activeIndex, onActiveIndexChange, onSwipe
   }, [activeIndex, snapshots.length, onActiveIndexChange]);
 
   const handleSwipe = useCallback(
-    (action: SwipeActionType) => {
-      if (!activeSnapshot) return;
-      onSwipe(activeSnapshot, action);
+    async (action: SwipeActionType) => {
+      if (!activeSnapshot || isProcessing) {
+        return;
+      }
+      setProcessing(true);
+      let result = false;
+      try {
+        result = await onSwipe(activeSnapshot, action);
+      } catch (error) {
+        console.error("Swipe handler failed", error);
+      }
+      if (!result) {
+        setProcessing(false);
+        return;
+      }
       setDirection(action === "like" ? "right" : "left");
       setTimeout(() => {
         const nextIndex = activeIndex + 1;
         onActiveIndexChange(nextIndex);
         setDirection(null);
+        setProcessing(false);
       }, 260);
     },
-    [activeSnapshot, activeIndex, onActiveIndexChange, onSwipe]
+    [activeSnapshot, activeIndex, isProcessing, onActiveIndexChange, onSwipe]
   );
 
   const displaySnapshots = useMemo(
@@ -67,15 +81,16 @@ export function CardStack({ snapshots, activeIndex, onActiveIndexChange, onSwipe
               animate={{ opacity: 1, scale: 1 - index * 0.04, y: index * 20 }}
               exit={{ opacity: 0, scale: 1.05, x: direction === "right" ? 300 : -300, rotate: direction === "right" ? 12 : -12 }}
               transition={{ duration: 0.3, ease: "easeOut" }}
-              drag={isActive ? "x" : false}
+              drag={isActive && !isProcessing ? "x" : false}
               dragConstraints={{ left: 0, right: 0 }}
               dragElastic={0.18}
               onDragEnd={(_, info) => {
                 if (!isActive) return;
+                if (isProcessing) return;
                 if (info.offset.x > SWIPE_THRESHOLD) {
-                  handleSwipe("like");
+                  void handleSwipe("like");
                 } else if (info.offset.x < -SWIPE_THRESHOLD) {
-                  handleSwipe("skip");
+                  void handleSwipe("skip");
                 }
               }}
             >

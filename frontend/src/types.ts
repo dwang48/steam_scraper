@@ -57,3 +57,27 @@ export interface SwipeResponse extends SwipePayload {
   user: number;
   created_at: string;
 }
+
+export interface CurrentUser {
+  id?: number;
+  username?: string;
+  email?: string;
+  first_name?: string;
+  last_name?: string;
+  display_name?: string;
+  is_authenticated: boolean;
+}
+
+export interface LoginPayload {
+  username: string;
+  password: string;
+  remember_me?: boolean;
+}
+
+export interface RegisterPayload {
+  username: string;
+  email: string;
+  password: string;
+  first_name?: string;
+  last_name?: string;
+}

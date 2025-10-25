@@ -307,7 +307,7 @@ class AuthViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["post"], url_path="logout")
     def logout_action(self, request):
         logout(request)
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response({"is_authenticated": False}, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["get"], url_path="me")
     def me(self, request):
