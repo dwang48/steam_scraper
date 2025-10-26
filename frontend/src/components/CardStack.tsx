@@ -75,7 +75,7 @@ export function CardStack({ snapshots, activeIndex, onActiveIndexChange, onSwipe
           return (
             <motion.div
               key={snapshot.id}
-              className={clsx("absolute inset-0")}
+              className={clsx("absolute inset-0", !isActive && "overflow-hidden")}
               style={{ zIndex: displaySnapshots.length - index }}
               initial={{ opacity: 0, scale: 0.95, y: 40 }}
               animate={{ opacity: 1, scale: 1 - index * 0.04, y: index * 20 }}

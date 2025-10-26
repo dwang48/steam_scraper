@@ -51,7 +51,7 @@ export function GameCard({ snapshot, active, offset = 0, onShowDetails }: GameCa
   return (
     <motion.article
       className={clsx(
-        "glass-panel card-gradient w-full h-full px-6 py-8 flex flex-col gap-6",
+        "glass-panel card-gradient w-full h-full px-4 py-4 sm:px-6 sm:py-8 flex flex-col gap-3 sm:gap-6",
         active ? "shadow-glass" : "opacity-80"
       )}
       style={{
@@ -88,7 +88,7 @@ export function GameCard({ snapshot, active, offset = 0, onShowDetails }: GameCa
               href={steamStoreUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="absolute bottom-3 right-3 rounded-full bg-black/60 px-3 py-1 text-xs text-mist hover:bg-black/80 transition cursor-pointer z-10"
+              className="absolute bottom-2 right-2 sm:bottom-3 sm:right-3 rounded-full bg-black/60 px-2 py-0.5 sm:px-3 sm:py-1 text-[0.625rem] sm:text-xs text-mist hover:bg-black/80 transition cursor-pointer z-10"
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -108,17 +108,17 @@ export function GameCard({ snapshot, active, offset = 0, onShowDetails }: GameCa
             </a>
           )}
         </div>
-        <span className="mt-4 inline-flex items-center rounded-full bg-accent-soft text-accent px-3 py-1 text-xs font-medium uppercase tracking-widest">
+        <span className="mt-2 sm:mt-4 inline-flex items-center rounded-full bg-accent-soft text-accent px-2.5 py-0.5 sm:px-3 sm:py-1 text-[0.625rem] sm:text-xs font-medium uppercase tracking-widest">
           {detectionStageLabel}
         </span>
-        <div className="mt-4 flex items-start justify-between gap-3">
-          <h2 className="text-2xl font-semibold text-mist leading-tight">{game.name}</h2>
+        <div className="mt-2 sm:mt-4 flex items-start justify-between gap-2 sm:gap-3">
+          <h2 className="text-lg sm:text-2xl font-semibold text-mist leading-tight">{game.name}</h2>
           {steamStoreUrl && (
             <a
               href={steamStoreUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-accent hover:text-white transition whitespace-nowrap cursor-pointer z-10 relative"
+              className="text-[0.625rem] sm:text-xs text-accent hover:text-white transition whitespace-nowrap cursor-pointer z-10 relative"
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -138,22 +138,22 @@ export function GameCard({ snapshot, active, offset = 0, onShowDetails }: GameCa
             </a>
           )}
         </div>
-        <p className="text-sm text-mist-subtle/80 mt-1">
+        <p className="text-xs sm:text-sm text-mist-subtle/80 mt-0.5 sm:mt-1">
           Followers {snapshot.followers ?? "—"} · WL est. {snapshot.wishlists_est ?? "—"}
         </p>
-        <p className="mt-4 text-sm text-mist-subtle/90 leading-relaxed line-clamp-3">{snapshot.description || "No description yet."}</p>
+        <p className="mt-2 sm:mt-4 text-xs sm:text-sm text-mist-subtle/90 leading-relaxed line-clamp-3">{snapshot.description || "No description yet."}</p>
         {tags.length > 0 && (
-          <div className="mt-5 flex flex-wrap gap-2">
+          <div className="mt-2 sm:mt-5 flex flex-wrap gap-1.5 sm:gap-2">
             {tags.map((tag) => (
-              <span key={tag} className="rounded-full bg-white/5 border border-white/10 px-3 py-1 text-xs text-mist/90">
+              <span key={tag} className="rounded-full bg-white/5 border border-white/10 px-2 py-0.5 sm:px-3 sm:py-1 text-[0.625rem] sm:text-xs text-mist/90">
                 {tag}
               </span>
             ))}
           </div>
         )}
       </div>
-      <div className="flex items-center justify-between mt-auto pt-4">
-        <div className="text-xs text-mist-subtle/70">
+      <div className="flex items-center justify-between mt-auto pt-2 sm:pt-4">
+        <div className="text-[0.625rem] sm:text-xs text-mist-subtle/70">
           {snapshot.release_date_raw || "TBA"}
         </div>
         <button
@@ -172,7 +172,7 @@ export function GameCard({ snapshot, active, offset = 0, onShowDetails }: GameCa
           onTouchStart={(event) => {
             event.stopPropagation();
           }}
-          className="text-sm text-accent font-medium hover:text-white transition cursor-pointer z-10 relative"
+          className="text-xs sm:text-sm text-accent font-medium hover:text-white transition cursor-pointer z-10 relative"
           style={{ touchAction: "none" }}
         >
           More

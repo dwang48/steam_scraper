@@ -154,9 +154,7 @@ def _build_daily_summary(target_date):
         "games": games_payload,
     }
 
-    serializer = serializers.DailySummarySerializer(data=summary)
-    serializer.is_valid(raise_exception=True)
-    return serializer.validated_data
+    return summary
 
 
 def _build_daily_summary_workbook(summary: dict) -> bytes:
@@ -377,6 +375,13 @@ class SwipeActionViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewset
             .filter(user=self.request.user)
             .order_by("-created_at")
         )
+        action_param = self.request.query_params.get("action")
+        if action_param in {
+            models.SwipeAction.ACTION_LIKE,
+            models.SwipeAction.ACTION_SKIP,
+            models.SwipeAction.ACTION_WATCHLIST,
+        }:
+            qs = qs.filter(action=action_param)
         date_param = self.request.query_params.get("date")
         if date_param:
             target_date = _parse_iso_date(date_param, None)

@@ -19,8 +19,8 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["id", "username", "email", "first_name", "last_name", "display_name"]
-        read_only_fields = ["id", "display_name"]
+        fields = ["id", "username", "email", "first_name", "last_name", "display_name", "is_staff"]
+        read_only_fields = ["id", "display_name", "is_staff"]
 
 
 class RegisterSerializer(serializers.Serializer):
@@ -117,11 +117,12 @@ class GameSnapshotSerializer(serializers.ModelSerializer):
 
 class SwipeActionSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
+    game_detail = GameSerializer(source="game", read_only=True)
 
     class Meta:
         model = models.SwipeAction
-        fields = ["id", "user", "game", "batch", "action", "note", "created_at"]
-        read_only_fields = ["id", "created_at", "user"]
+        fields = ["id", "user", "game", "game_detail", "batch", "action", "note", "created_at"]
+        read_only_fields = ["id", "created_at", "user", "game_detail"]
 
 
 class WatchlistEntrySerializer(serializers.ModelSerializer):

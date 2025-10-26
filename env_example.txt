@@ -1,3 +1,16 @@
+# Django配置
+DJANGO_DEBUG=True
+DJANGO_SECRET_KEY=change-me-in-production
+DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,.ngrok.io,.ngrok-free.app
+
+# CORS和CSRF配置 - 用于前后端分离和ngrok部署
+# 注意：将YOUR_NGROK_URL替换为你的实际ngrok URL（例如：https://abc123.ngrok.io）
+CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000,https://YOUR_NGROK_URL
+CSRF_TRUSTED_ORIGINS=http://localhost:5173,http://localhost:3000,https://YOUR_NGROK_URL
+
+# 如果使用ngrok的HTTPS链接，设置为True
+USE_HTTPS=True
+
 # SMTP 邮件配置
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587

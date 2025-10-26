@@ -1,5 +1,15 @@
 export type DetectionStage = "public_unreleased" | "early_stage" | "minimal_data" | string;
 
+export interface UserSummary {
+  id?: number;
+  username?: string;
+  email?: string;
+  first_name?: string;
+  last_name?: string;
+  display_name?: string;
+  is_staff?: boolean;
+}
+
 export interface GameSummary {
   id: number;
   steam_appid: number;
@@ -58,13 +68,36 @@ export interface SwipeResponse extends SwipePayload {
   created_at: string;
 }
 
-export interface CurrentUser {
-  id?: number;
-  username?: string;
-  email?: string;
-  first_name?: string;
-  last_name?: string;
-  display_name?: string;
+export interface SwipeActionRecord {
+  id: number;
+  user: UserSummary | null;
+  game: number;
+  game_detail?: GameSummary;
+  batch: number | null;
+  action: SwipeActionType;
+  note: string;
+  created_at: string;
+}
+
+export interface DailySummaryGameEntry {
+  game: GameSummary;
+  like_users: UserSummary[];
+  skip_users: UserSummary[];
+  watchlist_users: UserSummary[];
+  total_actions: number;
+}
+
+export interface DailySummary {
+  date: string;
+  total_actions: number;
+  unique_users: number;
+  like_count: number;
+  skip_count: number;
+  watchlist_count: number;
+  games: DailySummaryGameEntry[];
+}
+
+export interface CurrentUser extends UserSummary {
   is_authenticated: boolean;
 }
 

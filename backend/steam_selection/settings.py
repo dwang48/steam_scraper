@@ -121,6 +121,7 @@ CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[
     "http://localhost:3000",  # 其他常见前端端口
     "http://127.0.0.1:5173",
     "http://127.0.0.1:3000",
+    "https://a7729fd21d33.ngrok-free.app",
 ])
 
 CORS_ALLOW_CREDENTIALS = True  # 允许携带cookie（用于session认证）
@@ -131,15 +132,24 @@ CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[
     "http://localhost:3000",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:3000",
+    "http://10.251.1.1:5173",
+    "http://169.254.125.8:5173",
+    "https://a7729fd21d33.ngrok-free.app",
 ])
-
 # Session配置
-SESSION_COOKIE_SAMESITE = "Lax"  # CSRF保护
+# 如果使用ngrok HTTPS，设置 USE_HTTPS=True
+USE_HTTPS = env.bool("USE_HTTPS", default=False)
+
+SESSION_COOKIE_SAMESITE = "None" if USE_HTTPS else "Lax"  # 支持跨域（ngrok等）
 SESSION_COOKIE_HTTPONLY = True  # 防止XSS攻击
-SESSION_COOKIE_SECURE = not DEBUG  # 生产环境使用HTTPS
-CSRF_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SECURE = USE_HTTPS  # HTTPS时启用
+CSRF_COOKIE_SAMESITE = "None" if USE_HTTPS else "Lax"  # 支持跨域
 CSRF_COOKIE_HTTPONLY = False  # 前端需要读取CSRF token
-CSRF_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = USE_HTTPS
+
+# 允许ngrok等反向代理
+if USE_HTTPS:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # Integrations
 FEISHU_WEBHOOK_URL = env("FEISHU_WEBHOOK_URL", default="")

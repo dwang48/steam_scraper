@@ -6,7 +6,10 @@ import {
   SwipeResponse,
   CurrentUser,
   LoginPayload,
-  RegisterPayload
+  RegisterPayload,
+  SwipeActionRecord,
+  DailySummary,
+  UserSummary
 } from "../types";
 import { mockSnapshots } from "./mockData";
 
@@ -24,6 +27,41 @@ const demoUser: CurrentUser = {
 };
 
 let mockSignedIn = true;
+
+const mockTeamMembers: UserSummary[] = [
+  {
+    id: 1,
+    username: "demo",
+    first_name: "Demo",
+    last_name: "User",
+    display_name: "Demo User"
+  },
+  {
+    id: 2,
+    username: "mira",
+    first_name: "Mira",
+    last_name: "Chen",
+    display_name: "Mira Chen"
+  },
+  {
+    id: 3,
+    username: "liang",
+    first_name: "Liang",
+    last_name: "Hu",
+    display_name: "Liang Hu"
+  }
+];
+
+const mockSwipeHistory: SwipeActionRecord[] = mockSnapshots.slice(0, 8).map((snapshot, index) => ({
+  id: index + 1,
+  user: mockTeamMembers[0],
+  game: snapshot.game.id,
+  game_detail: snapshot.game,
+  batch: snapshot.batch_id ?? null,
+  action: "like",
+  note: "",
+  created_at: new Date(Date.now() - index * 3600 * 1000).toISOString()
+}));
 
 // Mock游戏列表API
 export async function mockListSnapshots(path: string): Promise<PaginatedResponse<GameSnapshot>> {
@@ -133,15 +171,54 @@ export async function mockLogout(): Promise<CurrentUser> {
   return { is_authenticated: false };
 }
 
+export async function mockListSwipes(): Promise<PaginatedResponse<SwipeActionRecord>> {
+  await delay(180);
+  return {
+    count: mockSwipeHistory.length,
+    next: null,
+    previous: null,
+    results: mockSwipeHistory
+  };
+}
+
+export async function mockDailySummary(params?: { date?: string }): Promise<DailySummary> {
+  await delay(220);
+  const targetDate = params?.date ?? new Date().toISOString().slice(0, 10);
+  const games = mockSnapshots.slice(0, 6).map((snapshot, index) => {
+    const likeUsers = mockTeamMembers.slice(0, (index % mockTeamMembers.length) + 1);
+    const watchlistUsers = index % 3 === 0 ? [mockTeamMembers[2]] : [];
+    return {
+      game: snapshot.game,
+      like_users: likeUsers,
+      skip_users: [],
+      watchlist_users: watchlistUsers,
+      total_actions: likeUsers.length + watchlistUsers.length
+    };
+  });
+  const likeCount = games.reduce((acc, entry) => acc + entry.like_users.length, 0);
+  const watchlistCount = games.reduce((acc, entry) => acc + entry.watchlist_users.length, 0);
+
+  return {
+    date: targetDate,
+    total_actions: likeCount + watchlistCount,
+    unique_users: mockTeamMembers.length,
+    like_count: likeCount,
+    skip_count: 0,
+    watchlist_count: watchlistCount,
+    games
+  };
+}
+
 // Mock API对象
 export const mockApi = {
   listSnapshots: mockListSnapshots,
+  listSwipes: mockListSwipes,
   createSwipe: mockCreateSwipe,
   ping: mockPing,
   currentUser: mockCurrentUser,
+  dailySummary: mockDailySummary,
   login: mockLogin,
   register: mockRegister,
   logout: mockLogout
 };
-
 

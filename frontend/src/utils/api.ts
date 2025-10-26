@@ -1,7 +1,16 @@
 import { mockApi } from "../mocks/mockApi";
-import type { CurrentUser, LoginPayload, RegisterPayload, SwipePayload, SwipeResponse } from "../types";
+import type {
+  CurrentUser,
+  DailySummary,
+  LoginPayload,
+  PaginatedResponse,
+  RegisterPayload,
+  SwipeActionRecord,
+  SwipePayload,
+  SwipeResponse
+} from "../types";
 
-// 检查是否启用demo模式
+// Determine whether we should use demo mode
 const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === "true";
 const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
@@ -9,6 +18,21 @@ const CSRF_COOKIE_NAME = "csrftoken";
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS", "TRACE"]);
 let cachedCsrfToken: string | null = null;
 let csrfFetchPromise: Promise<string | null> | null = null;
+
+function buildQuery(params?: Record<string, string | number | undefined | null>) {
+  if (!params) {
+    return "";
+  }
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") {
+      return;
+    }
+    searchParams.set(key, String(value));
+  });
+  const queryString = searchParams.toString();
+  return queryString ? `?${queryString}` : "";
+}
 
 function getCookie(name: string): string | null {
   if (typeof document === "undefined") {
@@ -68,7 +92,7 @@ async function ensureCsrfToken(): Promise<string | null> {
   return cachedCsrfToken;
 }
 
-// 真实API请求函数
+// Low-level helper for authenticated API requests
 async function request<T>(endpoint: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? "GET").toUpperCase();
   const headers = new Headers(init?.headers ?? {});
@@ -97,11 +121,15 @@ async function request<T>(endpoint: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-// 真实API对象
+// Real API surface used outside demo mode
 const realApi = {
   listSnapshots: (path: string) => {
     const endpoint = path.startsWith("/games") ? path : `/games/${path}`;
     return request(endpoint);
+  },
+  listSwipes: (params?: Record<string, string | number | undefined | null>) => {
+    const query = buildQuery(params);
+    return request<PaginatedResponse<SwipeActionRecord>>(`/swipes/${query}`);
   },
   createSwipe: (payload: SwipePayload) =>
     request<SwipeResponse>("/swipes/", {
@@ -110,6 +138,10 @@ const realApi = {
     }),
   ping: () => request("/health/"),
   currentUser: () => request<CurrentUser>("/auth/me/"),
+  dailySummary: (params?: { date?: string }) => {
+    const query = buildQuery(params);
+    return request<DailySummary>(`/reports/daily-summary/${query}`);
+  },
   login: (payload: LoginPayload) =>
     request<CurrentUser>("/auth/login/", {
       method: "POST",
@@ -126,15 +158,15 @@ const realApi = {
     })
 };
 
-// 导出API对象（根据模式选择真实API或Mock API）
+// Expose either the real API or the mock API depending on mode
 export const api = DEMO_MODE ? mockApi : realApi;
 export const IS_DEMO_MODE = DEMO_MODE;
 
-// 在控制台输出当前模式
+// Log the active mode for quick diagnostics
 if (DEMO_MODE) {
-  console.log("%c🎭 Demo模式已启用", "color: #10b981; font-size: 16px; font-weight: bold;");
-  console.log("%c使用Mock数据，无需后端API", "color: #10b981; font-size: 12px;");
+  console.log("%c🎭 Demo mode enabled", "color: #10b981; font-size: 16px; font-weight: bold;");
+  console.log("%cMock data in use, no backend API required", "color: #10b981; font-size: 12px;");
 } else {
-  console.log("%c🔌 生产模式", "color: #3b82f6; font-size: 16px; font-weight: bold;");
-  console.log(`%cAPI地址: ${API_BASE}`, "color: #3b82f6; font-size: 12px;");
+  console.log("%c🔌 Production mode", "color: #3b82f6; font-size: 16px; font-weight: bold;");
+  console.log(`%cAPI base: ${API_BASE}`, "color: #3b82f6; font-size: 12px;");
 }
