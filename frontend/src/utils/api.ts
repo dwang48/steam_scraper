@@ -2,6 +2,7 @@ import { mockApi } from "../mocks/mockApi";
 import type {
   CurrentUser,
   DailySummary,
+  LeaderboardStats,
   LoginPayload,
   PaginatedResponse,
   RegisterPayload,
@@ -138,9 +139,13 @@ const realApi = {
     }),
   ping: () => request("/health/"),
   currentUser: () => request<CurrentUser>("/auth/me/"),
-  dailySummary: (params?: { date?: string }) => {
+  dailySummary: (params?: { date?: string; window?: "day" | "week" | "month" }) => {
     const query = buildQuery(params);
     return request<DailySummary>(`/reports/daily-summary/${query}`);
+  },
+  leaderboardStats: (params?: { date?: string; window?: "day" | "week" | "month" }) => {
+    const query = buildQuery(params);
+    return request<LeaderboardStats>(`/reports/leaderboard/${query}`);
   },
   login: (payload: LoginPayload) =>
     request<CurrentUser>("/auth/login/", {

@@ -9,6 +9,7 @@ from datetime import datetime, date
 from pathlib import Path
 from typing import Any
 
+import requests
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
@@ -38,6 +39,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        self._asset_cache: dict[int, dict[str, str]] = {}
         csv_path = Path(options["csv_path"]).expanduser()
         if not csv_path.exists():
             raise CommandError(f"CSV file not found: {csv_path}")
@@ -123,30 +125,42 @@ class Command(BaseCommand):
             game.latest_release_date = row.get("release_date", game.latest_release_date or "")
             game.latest_detection_stage = row.get("detection_stage", game.latest_detection_stage or "")
             game.latest_api_response_type = row.get("api_response_type", game.latest_api_response_type or "")
+            assets = self._get_game_assets(steam_id, game)
+            if assets.get("capsule"):
+                game.capsule_image_url = assets["capsule"]
+            if assets.get("header"):
+                game.header_image_url = assets["header"]
+            if assets.get("background"):
+                game.background_image_url = assets["background"]
+            if assets.get("screenshots"):
+                game.screenshot_urls = assets["screenshots"]
+            if assets.get("trailers"):
+                game.trailer_videos = assets["trailers"]
             game.save()
 
-            snapshot = models.GameSnapshot.objects.create(
-                game=game,
-                batch=batch,
-                detection_stage=row.get("detection_stage", ""),
-                api_response_type=row.get("api_response_type", ""),
-                potential_duplicate=str(row.get("potential_duplicate", "")).lower() in {"true", "1", "yes"},
-                discovery_date=self._parse_date(row.get("discovery_date")),
-                ingested_for_date=batch.ingested_for_date,
-                release_date_raw=row.get("release_date", ""),
-                description=row.get("description", ""),
-                supported_languages=row.get("supported_languages", ""),
-                followers=self._parse_int(row.get("followers")),
-                wishlists_est=self._parse_int(row.get("wishlists_est")),
-                wishlist_rank=self._parse_int(row.get("wishlist_rank")),
-                source_categories=row.get("categories", ""),
-                source_genres=row.get("genres", ""),
-                source_tags=row.get("target_tags_found", ""),
-                raw_payload=row,
-            )
+            defaults = {
+                "batch": batch,
+                "detection_stage": row.get("detection_stage", ""),
+                "api_response_type": row.get("api_response_type", ""),
+                "potential_duplicate": str(row.get("potential_duplicate", "")).lower() in {"true", "1", "yes"},
+                "discovery_date": self._parse_date(row.get("discovery_date")),
+                "release_date_raw": row.get("release_date", ""),
+                "description": row.get("description", ""),
+                "supported_languages": row.get("supported_languages", ""),
+                "followers": self._parse_int(row.get("followers")),
+                "wishlists_est": self._parse_int(row.get("wishlists_est")),
+                "wishlist_rank": self._parse_int(row.get("wishlist_rank")),
+                "source_categories": row.get("categories", ""),
+                "source_genres": row.get("genres", ""),
+                "source_tags": row.get("target_tags_found", ""),
+                "raw_payload": row,
+            }
 
-            # Optional: link swipe actions to batch later if needed
-            _ = snapshot  # silence lint warnings
+            models.GameSnapshot.objects.update_or_create(
+                game=game,
+                ingested_for_date=batch.ingested_for_date,
+                defaults=defaults,
+            )
 
     def _parse_int(self, value: Any) -> int | None:
         if value in (None, "", "None"):
@@ -165,3 +179,91 @@ class Command(BaseCommand):
             except ValueError:
                 continue
         return None
+
+    def _get_game_assets(self, appid: int, game: models.Game) -> dict[str, object]:
+        # Prefer existing values to avoid unnecessary requests when everything is already populated
+        has_core_images = bool(game.capsule_image_url and game.header_image_url and game.background_image_url)
+        has_screenshots = bool(game.screenshot_urls)
+        has_trailers = bool(getattr(game, "trailer_videos", []))
+        if has_core_images and has_screenshots and has_trailers:
+            return {
+                "capsule": game.capsule_image_url,
+                "header": game.header_image_url,
+                "background": game.background_image_url,
+                "screenshots": list(game.screenshot_urls or []),
+                "trailers": list(getattr(game, "trailer_videos", []) or []),
+            }
+
+        if appid in self._asset_cache:
+            return self._asset_cache[appid]
+
+        assets: dict[str, object] = {}
+        if game.capsule_image_url:
+            assets["capsule"] = game.capsule_image_url
+        if game.header_image_url:
+            assets["header"] = game.header_image_url
+        if game.background_image_url:
+            assets["background"] = game.background_image_url
+        if game.screenshot_urls:
+            assets["screenshots"] = list(game.screenshot_urls)
+        if getattr(game, "trailer_videos", []):
+            assets["trailers"] = list(getattr(game, "trailer_videos", []))
+
+        try:
+            response = requests.get(
+                "https://store.steampowered.com/api/appdetails",
+                params={"appids": appid, "l": "en", "cc": "us"},
+                timeout=6,
+            )
+            payload = response.json()
+        except (requests.RequestException, ValueError):
+            payload = None
+
+        if isinstance(payload, dict):
+            entry = payload.get(str(appid))
+            if isinstance(entry, dict) and entry.get("success") and isinstance(entry.get("data"), dict):
+                data = entry["data"]
+                capsule = data.get("capsule_image") or data.get("capsule_imagev5")
+                header = data.get("header_image")
+                background = data.get("background_raw") or data.get("background")
+                screenshots = []
+                for screenshot in data.get("screenshots", []) or []:
+                    if isinstance(screenshot, dict):
+                        url = screenshot.get("path_full") or screenshot.get("path_thumbnail")
+                        if url:
+                            screenshots.append(url)
+                    if len(screenshots) >= 8:
+                        break
+                if capsule:
+                    assets["capsule"] = capsule
+                if header:
+                    assets["header"] = header
+                if background:
+                    assets["background"] = background
+                if screenshots:
+                    assets["screenshots"] = screenshots
+                trailers = []
+                for movie in data.get("movies", []) or []:
+                    if not isinstance(movie, dict):
+                        continue
+                    mp4_data = movie.get("mp4") or {}
+                    webm_data = movie.get("webm") or {}
+                    mp4_url = mp4_data.get("max") or mp4_data.get("480")
+                    webm_url = webm_data.get("max") or webm_data.get("480")
+                    if not (mp4_url or webm_url):
+                        continue
+                    trailers.append(
+                        {
+                            "id": movie.get("id"),
+                            "name": movie.get("name"),
+                            "thumbnail": movie.get("thumbnail"),
+                            "mp4": mp4_url,
+                            "webm": webm_url,
+                            "highlight": bool(movie.get("highlight")),
+                        }
+                    )
+                if trailers:
+                    assets["trailers"] = trailers
+
+        self._asset_cache[appid] = assets
+        return assets

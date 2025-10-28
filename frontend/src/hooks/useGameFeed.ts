@@ -9,6 +9,7 @@ interface UseGameFeedParams {
   tag?: string;
   category?: string;
   genre?: string;
+  excludeHandled?: boolean;
 }
 
 export function useGameFeed(params: UseGameFeedParams) {
@@ -18,8 +19,9 @@ export function useGameFeed(params: UseGameFeedParams) {
     if (params.tag) searchParams.set("tag", params.tag);
     if (params.category) searchParams.set("category", params.category);
     if (params.genre) searchParams.set("genre", params.genre);
+    if (params.excludeHandled) searchParams.set("exclude_handled", "true");
     return `?${searchParams.toString()}`;
-  }, [params.date, params.minFollowers, params.tag, params.category, params.genre]);
+  }, [params.date, params.minFollowers, params.tag, params.category, params.genre, params.excludeHandled]);
 
   const { data, error, isLoading, mutate } = useSWR<PaginatedResponse<GameSnapshot>>(
     `/games/${query}`,

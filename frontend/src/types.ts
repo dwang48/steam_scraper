@@ -1,5 +1,14 @@
 export type DetectionStage = "public_unreleased" | "early_stage" | "minimal_data" | string;
 
+export interface TrailerVideo {
+  id?: number;
+  name?: string;
+  thumbnail?: string;
+  mp4?: string;
+  webm?: string;
+  highlight?: boolean;
+}
+
 export interface UserSummary {
   id?: number;
   username?: string;
@@ -24,6 +33,11 @@ export interface GameSummary {
   latest_release_date: string;
   latest_detection_stage: DetectionStage;
   latest_api_response_type: string;
+  capsule_image_url?: string;
+  header_image_url?: string;
+  background_image_url?: string;
+  screenshot_urls?: string[];
+  trailer_videos?: TrailerVideo[];
 }
 
 export interface GameSnapshot {
@@ -44,6 +58,10 @@ export interface GameSnapshot {
   source_categories: string;
   source_genres: string;
   source_tags: string;
+  handled?: boolean | null;
+  user_action?: SwipeActionType | null;
+  user_note?: string | null;
+  user_handled_at?: string | null;
 }
 
 export interface PaginatedResponse<T> {
@@ -89,6 +107,9 @@ export interface DailySummaryGameEntry {
 
 export interface DailySummary {
   date: string;
+  window: "day" | "week" | "month" | string;
+  start_date: string;
+  end_date: string;
   total_actions: number;
   unique_users: number;
   like_count: number;
@@ -113,4 +134,34 @@ export interface RegisterPayload {
   password: string;
   first_name?: string;
   last_name?: string;
+}
+
+export interface LeaderboardMemberStat {
+  user: UserSummary;
+  handled_games: number;
+  like_count: number;
+  skip_count: number;
+  watchlist_count: number;
+  total_actions: number;
+  last_action_at?: string | null;
+}
+
+export interface LikeOverlapEntry {
+  user_a: UserSummary;
+  user_b: UserSummary;
+  shared_likes: number;
+  union_size: number;
+  jaccard: number;
+}
+
+export interface LeaderboardStats {
+  date: string;
+  window: "day" | "week" | "month" | string;
+  start_date: string;
+  end_date: string;
+  total_actions: number;
+  unique_games: number;
+  member_count: number;
+  member_stats: LeaderboardMemberStat[];
+  overlap_pairs: LikeOverlapEntry[];
 }

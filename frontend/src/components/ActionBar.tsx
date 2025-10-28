@@ -8,7 +8,13 @@ interface ActionBarProps {
   disabled?: boolean;
 }
 
-export function ActionBar({ snapshot, onLike, onSkip, onDetails, disabled }: ActionBarProps) {
+export function ActionBar({
+  snapshot,
+  onLike,
+  onSkip,
+  onDetails,
+  disabled
+}: ActionBarProps) {
   return (
     <nav className="px-4 pb-6 sm:px-6 sm:pb-10">
       <div className="glass-panel px-5 py-4 sm:px-6 flex items-center justify-between gap-4 rounded-2xl sm:rounded-3xl">

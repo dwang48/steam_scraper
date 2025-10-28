@@ -9,7 +9,8 @@ import {
   RegisterPayload,
   SwipeActionRecord,
   DailySummary,
-  UserSummary
+  UserSummary,
+  LeaderboardStats
 } from "../types";
 import { mockSnapshots } from "./mockData";
 
@@ -181,9 +182,22 @@ export async function mockListSwipes(): Promise<PaginatedResponse<SwipeActionRec
   };
 }
 
-export async function mockDailySummary(params?: { date?: string }): Promise<DailySummary> {
+export async function mockDailySummary(params?: { date?: string; window?: "day" | "week" | "month" }): Promise<DailySummary> {
   await delay(220);
   const targetDate = params?.date ?? new Date().toISOString().slice(0, 10);
+  const windowValue = params?.window ?? "day";
+  const target = new Date(`${targetDate}T12:00:00`);
+  const startDate = new Date(target);
+  const endDate = new Date(target);
+  if (windowValue === "week") {
+    startDate.setDate(startDate.getDate() - 6);
+  } else if (windowValue === "month") {
+    startDate.setDate(1);
+    const month = target.getMonth();
+    const year = target.getFullYear();
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    endDate.setDate(lastDay);
+  }
   const games = mockSnapshots.slice(0, 6).map((snapshot, index) => {
     const likeUsers = mockTeamMembers.slice(0, (index % mockTeamMembers.length) + 1);
     const watchlistUsers = index % 3 === 0 ? [mockTeamMembers[2]] : [];
@@ -200,12 +214,78 @@ export async function mockDailySummary(params?: { date?: string }): Promise<Dail
 
   return {
     date: targetDate,
+    window: windowValue,
+    start_date: startDate.toISOString().slice(0, 10),
+    end_date: endDate.toISOString().slice(0, 10),
     total_actions: likeCount + watchlistCount,
     unique_users: mockTeamMembers.length,
     like_count: likeCount,
     skip_count: 0,
     watchlist_count: watchlistCount,
     games
+  };
+}
+
+export async function mockLeaderboardStats(params?: { date?: string; window?: "day" | "week" | "month" }): Promise<LeaderboardStats> {
+  await delay(180);
+  const targetDate = params?.date ?? new Date().toISOString().slice(0, 10);
+  const windowValue = params?.window ?? "day";
+  const target = new Date(`${targetDate}T12:00:00`);
+  const startDate = new Date(target);
+  const endDate = new Date(target);
+  if (windowValue === "week") {
+    startDate.setDate(startDate.getDate() - 6);
+  } else if (windowValue === "month") {
+    startDate.setDate(1);
+    const month = target.getMonth();
+    const year = target.getFullYear();
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    endDate.setDate(lastDay);
+  }
+
+  const member_stats = mockTeamMembers.map((member, index) => {
+    const handled = 12 - index * 3;
+    const likeCount = Math.max(2, handled - 5 - index);
+    const skipCount = Math.max(0, index * 2);
+    const watchlistCount = Math.max(0, handled - likeCount - skipCount);
+    return {
+      user: member,
+      handled_games: handled,
+      like_count: likeCount,
+      skip_count: skipCount,
+      watchlist_count: watchlistCount,
+      total_actions: handled,
+      last_action_at: new Date(Date.now() - index * 7200 * 1000).toISOString()
+    };
+  });
+
+  const overlap_pairs = [
+    {
+      user_a: mockTeamMembers[0],
+      user_b: mockTeamMembers[1],
+      shared_likes: 5,
+      union_size: 8,
+      jaccard: 5 / 8
+    },
+    {
+      user_a: mockTeamMembers[0],
+      user_b: mockTeamMembers[2],
+      shared_likes: 3,
+      union_size: 9,
+      jaccard: 3 / 9
+    }
+  ];
+
+  return {
+    date: targetDate,
+    window: windowValue,
+    start_date: startDate.toISOString().slice(0, 10),
+    end_date: endDate.toISOString().slice(0, 10),
+    total_actions: member_stats.reduce((acc, item) => acc + item.total_actions, 0),
+    unique_games: 18,
+    member_count: member_stats.length,
+    member_stats,
+    overlap_pairs
   };
 }
 
@@ -217,8 +297,8 @@ export const mockApi = {
   ping: mockPing,
   currentUser: mockCurrentUser,
   dailySummary: mockDailySummary,
+  leaderboardStats: mockLeaderboardStats,
   login: mockLogin,
   register: mockRegister,
   logout: mockLogout
 };
-

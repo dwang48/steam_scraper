@@ -45,6 +45,11 @@ class Game(models.Model):
     latest_release_date = models.CharField(max_length=120, blank=True)
     latest_detection_stage = models.CharField(max_length=50, blank=True)
     latest_api_response_type = models.CharField(max_length=50, blank=True)
+    capsule_image_url = models.URLField(max_length=500, blank=True)
+    header_image_url = models.URLField(max_length=500, blank=True)
+    background_image_url = models.URLField(max_length=500, blank=True)
+    screenshot_urls = models.JSONField(default=list, blank=True)
+    trailer_videos = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -91,6 +96,9 @@ class GameSnapshot(models.Model):
             models.Index(fields=["ingested_for_date"]),
             models.Index(fields=["followers"]),
             models.Index(fields=["wishlists_est"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=["game", "ingested_for_date"], name="unique_game_snapshot_per_day")
         ]
 
     def __str__(self) -> str:
@@ -149,6 +157,9 @@ class SwipeAction(models.Model):
             models.Index(fields=["user", "created_at"]),
             models.Index(fields=["game", "created_at"]),
             models.Index(fields=["action"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=["user", "game"], name="unique_user_game_swipe")
         ]
 
     def __str__(self) -> str:

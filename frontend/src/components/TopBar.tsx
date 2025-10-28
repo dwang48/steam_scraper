@@ -1,6 +1,8 @@
 import { format } from "date-fns";
 import { motion } from "framer-motion";
+import { useMemo } from "react";
 import type { CurrentUser } from "../types";
+import { getAdminUrl } from "../utils/admin";
 
 interface TopBarProps {
   date: Date;
@@ -12,6 +14,9 @@ interface TopBarProps {
   onSignIn?: () => void;
   onSignOut?: () => void;
   signOutInFlight?: boolean;
+  showingHandled?: boolean;
+  handledCount?: number;
+  onToggleShowHandled?: () => void;
 }
 
 function getDisplayName(user?: CurrentUser | null) {
@@ -42,7 +47,10 @@ export function TopBar({
   loadingUser,
   onSignIn,
   onSignOut,
-  signOutInFlight
+  signOutInFlight,
+  showingHandled,
+  handledCount = 0,
+  onToggleShowHandled
 }: TopBarProps) {
   const displayName = loadingUser ? "Loading…" : getDisplayName(user);
   const subtitle = loadingUser
@@ -53,7 +61,14 @@ export function TopBar({
   const initials = loadingUser ? "…" : getInitials(displayName);
   const showSignIn = !loadingUser && !user?.is_authenticated;
   const showAdmin = Boolean(user?.is_authenticated && user?.is_staff);
-  const adminUrl = import.meta.env.VITE_ADMIN_URL ?? "http://localhost:8000/admin/";
+  const adminUrl = useMemo(() => getAdminUrl(), []);
+  const toggleLabel = showingHandled ? "Hide processed" : "Show processed";
+  const processedText =
+    showingHandled && handledCount > 0
+      ? `${handledCount} processed in view`
+      : !showingHandled && handledCount > 0
+      ? `${handledCount} already processed`
+      : "";
 
   return (
     <header className="sticky top-0 z-40 px-4 py-2 sm:px-6 sm:py-5 bg-gradient-to-b from-ink/95 via-ink/70 to-transparent backdrop-blur-xl">
@@ -113,7 +128,20 @@ export function TopBar({
           >
             {format(date, "EEEE, MMM d")}
           </motion.h1>
-          <p className="text-xs sm:text-sm text-mist-subtle/80 mt-0.5 sm:mt-1">{total} experiences awaiting</p>
+          <div className="mt-0.5 sm:mt-1 flex flex-col gap-1">
+            <p className="text-xs sm:text-sm text-mist-subtle/80">
+              {total} experiences awaiting{processedText ? ` • ${processedText}` : ""}
+            </p>
+            {onToggleShowHandled && (
+              <button
+                type="button"
+                onClick={onToggleShowHandled}
+                className="self-start rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[0.625rem] text-mist-subtle/85 hover:bg-white/10 hover:text-white transition"
+              >
+                {toggleLabel}
+              </button>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-1.5 sm:gap-2">
           <button

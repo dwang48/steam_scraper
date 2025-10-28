@@ -8,12 +8,16 @@ import { ActionBar } from "./components/ActionBar";
 import { AuthDialog } from "./components/AuthDialog";
 import { PrimaryNav, AppView } from "./components/PrimaryNav";
 import { TeamLikesView } from "./components/TeamLikesView";
+import { LeaderboardView } from "./components/LeaderboardView";
 import { MyLikesView } from "./components/MyLikesView";
 import { useGameFeed } from "./hooks/useGameFeed";
 import { useSwipe } from "./hooks/useSwipe";
 import { useCurrentUser } from "./hooks/useCurrentUser";
 import { GameSnapshot, LoginPayload, RegisterPayload, SwipeActionType } from "./types";
 import { api, IS_DEMO_MODE } from "./utils/api";
+import { LikeReasonDialog } from "./components/LikeReasonDialog";
+
+type SwipeOutcome = { success: boolean; advance?: boolean };
 
 function initialActiveDate() {
   if (IS_DEMO_MODE) {
@@ -31,30 +35,63 @@ export default function App() {
   const [isAuthOpen, setAuthOpen] = useState(false);
   const [signOutPending, setSignOutPending] = useState(false);
   const [activeView, setActiveView] = useState<AppView>("daily");
+  const [likeDialogOpen, setLikeDialogOpen] = useState(false);
+  const [likeDialogTarget, setLikeDialogTarget] = useState<GameSnapshot | null>(null);
+  const [isSavingLike, setSavingLike] = useState(false);
+  const [showHandled, setShowHandled] = useState(false);
 
   // Parse at midday to avoid timezone drifting the intended date
   const dateObj = useMemo(() => parseISO(activeDate + "T12:00:00"), [activeDate]);
   const todayDate = useMemo(() => parseISO(format(new Date(), "yyyy-MM-dd") + "T12:00:00"), []);
 
-  const { snapshots, isLoading, error, mutate, total } = useGameFeed({
-    date: activeDate
-  });
   const {
     user: currentUser,
     isLoading: isUserLoading,
     refresh: refreshCurrentUser
   } = useCurrentUser();
 
+  const excludeHandled = currentUser?.is_authenticated ? !showHandled : false;
+
+  const { snapshots, isLoading, error, mutate, total } = useGameFeed({
+    date: activeDate,
+    excludeHandled
+  });
+
   const currentSnapshot = snapshots[cursor] ?? null;
+
+  const pendingCount = useMemo(() => {
+    if (excludeHandled) {
+      return total;
+    }
+    return snapshots.filter((snapshot) => !snapshot.handled).length;
+  }, [excludeHandled, total, snapshots]);
+
+  const handledCount = useMemo(() => {
+    if (excludeHandled) {
+      return 0;
+    }
+    return Math.max(0, total - pendingCount);
+  }, [excludeHandled, total, pendingCount]);
+
+  const handleToggleShowHandled = useCallback(() => {
+    setShowHandled((prev) => !prev);
+    setActiveSnapshot(null);
+    setCursor(0);
+  }, []);
 
   useEffect(() => {
     setCursor((prev) => {
       if (snapshots.length === 0) {
         return 0;
       }
-      return Math.min(prev, snapshots.length - 1);
+      const maxIndex = snapshots.length - 1;
+      return Math.min(prev, maxIndex);
     });
   }, [snapshots.length]);
+
+  useEffect(() => {
+    setCursor(0);
+  }, [activeDate]);
 
   const clearToastTimer = useCallback(() => {
     if (toastTimer.current) {
@@ -88,6 +125,12 @@ export default function App() {
     setAuthOpen(true);
   }, []);
 
+  useEffect(() => {
+    if (!currentUser?.is_authenticated && showHandled) {
+      setShowHandled(false);
+    }
+  }, [currentUser?.is_authenticated, showHandled]);
+
   const handleChangeDate = useCallback(
     (direction: "prev" | "next") => {
       const nextDate = direction === "prev" ? subDays(dateObj, 1) : addDays(dateObj, 1);
@@ -100,49 +143,132 @@ export default function App() {
   );
 
   const handleSwipe = useCallback(
-    async (snapshot: GameSnapshot, action: SwipeActionType) => {
+    async (
+      snapshot: GameSnapshot,
+      action: SwipeActionType,
+      note?: string,
+      options?: { advanceCursor?: boolean; message?: string; tone?: "positive" | "neutral" }
+    ): Promise<SwipeOutcome> => {
       if (!currentUser?.is_authenticated) {
         showToast("Please sign in to record actions.", "neutral", 2600);
         setAuthOpen(true);
-        return false;
+        return { success: false, advance: false };
       }
 
+      const advancePreference = options?.advanceCursor ?? true;
       try {
         await submit({
           game: snapshot.game.id,
           batch: snapshot.batch_id,
-          action
+          action,
+          note
         });
 
-        if (action === "like") {
-          showToast(`${snapshot.game.name} added to favorites.`, "positive");
-        } else if (action === "skip") {
-          showToast(`Skipped ${snapshot.game.name}.`, "neutral", 1800);
-        } else {
-          showToast("Watchlist updated.", "positive");
+        const handledAt = new Date().toISOString();
+        await mutate(
+          (current) => {
+            if (!current) return current;
+            const results = current.results ?? [];
+            if (excludeHandled) {
+              const filtered = results.filter((item) => item.id !== snapshot.id);
+              const nextCount = typeof current.count === "number" ? Math.max(0, current.count - 1) : current.count;
+              return {
+                ...current,
+                results: filtered,
+                count: nextCount
+              };
+            }
+            const nextResults = results.map((item) =>
+              item.id === snapshot.id
+                ? {
+                    ...item,
+                    handled: true,
+                    user_action: action,
+                    user_note: note ?? null,
+                    user_handled_at: handledAt
+                  }
+                : item
+            );
+            return {
+              ...current,
+              results: nextResults
+            };
+          },
+          { revalidate: false }
+        );
+        void mutate();
+
+        const message =
+          options?.message ??
+          (action === "like"
+            ? `${snapshot.game.name} added to favorites.`
+            : action === "skip"
+            ? `Skipped ${snapshot.game.name}.`
+            : "Watchlist updated.");
+        const tone: "positive" | "neutral" =
+          options?.tone ??
+          (action === "like" || action === "watchlist" ? "positive" : "neutral");
+        const duration = action === "skip" ? 1800 : 2000;
+        showToast(message, tone, duration);
+
+        if (advancePreference || excludeHandled) {
+          setActiveSnapshot((current) => (current?.id === snapshot.id ? null : current));
         }
 
-        setActiveSnapshot((current) => (current?.id === snapshot.id ? null : current));
-        return true;
+        return { success: true, advance: excludeHandled ? false : advancePreference };
       } catch (err) {
         console.error("Swipe error", err);
         showToast("Could not sync action.", "neutral", 2600);
-        return false;
+        return { success: false, advance: false };
       }
     },
-    [submit, showToast, currentUser]
+    [submit, showToast, currentUser, mutate, excludeHandled]
   );
 
   const handleActionBarSwipe = useCallback(
     async (action: SwipeActionType) => {
       if (!currentSnapshot) return;
-      const succeeded = await handleSwipe(currentSnapshot, action);
-      if (succeeded) {
+      const outcome = await handleSwipe(currentSnapshot, action);
+      if (!outcome.success) return;
+      const shouldAdvance = outcome.advance ?? outcome.success;
+      if (shouldAdvance) {
         setCursor((prev) => prev + 1);
       }
     },
     [currentSnapshot, handleSwipe]
   );
+
+  const handleRequestLike = useCallback(
+    (snapshot: GameSnapshot | null) => {
+      if (!snapshot) return;
+      if (!currentUser?.is_authenticated) {
+        showToast("Please sign in to record actions.", "neutral", 2600);
+        setAuthOpen(true);
+        return;
+      }
+      setLikeDialogTarget(snapshot);
+      setLikeDialogOpen(true);
+    },
+    [currentUser, showToast]
+  );
+
+  const handleLikeSubmit = useCallback(
+    async (note: string) => {
+      if (!likeDialogTarget) return;
+      setSavingLike(true);
+      const outcome = await handleSwipe(likeDialogTarget, "like", note, { advanceCursor: true });
+      setSavingLike(false);
+      if (!outcome.success) return;
+      setLikeDialogOpen(false);
+      setLikeDialogTarget(null);
+      const shouldAdvance = outcome.advance ?? outcome.success;
+      if (shouldAdvance) {
+        setCursor((prev) => prev + 1);
+      }
+    },
+    [likeDialogTarget, handleSwipe]
+  );
+
 
   const handleLogin = useCallback(
     async (payload: LoginPayload) => {
@@ -200,7 +326,7 @@ export default function App() {
           <div className="mx-auto flex w-full max-w-lg flex-col">
             <TopBar
               date={dateObj}
-              total={total}
+              total={pendingCount}
               onChangeDate={handleChangeDate}
               disableNext={!isAfter(todayDate, dateObj)}
               user={currentUser}
@@ -208,6 +334,9 @@ export default function App() {
               onSignIn={handleRequireSignIn}
               onSignOut={handleSignOut}
               signOutInFlight={signOutPending}
+              showingHandled={showHandled}
+              handledCount={handledCount}
+              onToggleShowHandled={currentUser?.is_authenticated ? handleToggleShowHandled : undefined}
             />
             <main className="flex-1 px-3 py-2 sm:px-6 sm:py-6 flex flex-col gap-3 sm:gap-6">
               <section className="relative flex-1 min-h-[520px] sm:min-h-[600px] md:min-h-[680px]">
@@ -246,7 +375,7 @@ export default function App() {
               <div className="sticky bottom-0 z-30 pt-2 bg-gradient-to-t from-ink/95 via-ink/60 to-transparent">
                 <ActionBar
                   snapshot={currentSnapshot}
-                  onLike={() => handleActionBarSwipe("like")}
+                  onLike={() => handleRequestLike(currentSnapshot)}
                   onSkip={() => handleActionBarSwipe("skip")}
                   onDetails={() => setActiveSnapshot(currentSnapshot)}
                   disabled={isSubmitting}
@@ -274,6 +403,11 @@ export default function App() {
             isAuthenticated={Boolean(currentUser?.is_authenticated)}
             onRequireSignIn={handleRequireSignIn}
           />
+        ) : activeView === "leaderboard" ? (
+          <LeaderboardView
+            isAuthenticated={Boolean(currentUser?.is_authenticated)}
+            onRequireSignIn={handleRequireSignIn}
+          />
         ) : (
           <MyLikesView
             isAuthenticated={Boolean(currentUser?.is_authenticated)}
@@ -287,6 +421,22 @@ export default function App() {
         onOpenChange={setAuthOpen}
         onLogin={handleLogin}
         onRegister={handleRegister}
+      />
+      <LikeReasonDialog
+        open={likeDialogOpen}
+        onOpenChange={(open) => {
+          if (isSavingLike) return;
+          if (!open) {
+            setLikeDialogOpen(false);
+            setLikeDialogTarget(null);
+          } else {
+            setLikeDialogOpen(true);
+          }
+        }}
+        defaultNote={""}
+        onSubmit={handleLikeSubmit}
+        onSkip={() => handleLikeSubmit("")}
+        submitting={isSavingLike}
       />
     </div>
   );

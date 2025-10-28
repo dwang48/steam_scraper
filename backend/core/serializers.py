@@ -86,11 +86,20 @@ class GameSerializer(serializers.ModelSerializer):
             "latest_release_date",
             "latest_detection_stage",
             "latest_api_response_type",
+            "capsule_image_url",
+            "header_image_url",
+            "background_image_url",
+            "screenshot_urls",
+            "trailer_videos",
         ]
 
 
 class GameSnapshotSerializer(serializers.ModelSerializer):
     game = GameSerializer()
+    handled = serializers.SerializerMethodField()
+    user_action = serializers.SerializerMethodField()
+    user_note = serializers.SerializerMethodField()
+    user_handled_at = serializers.SerializerMethodField()
 
     class Meta:
         model = models.GameSnapshot
@@ -112,7 +121,27 @@ class GameSnapshotSerializer(serializers.ModelSerializer):
             "source_categories",
             "source_genres",
             "source_tags",
+            "handled",
+            "user_action",
+            "user_note",
+            "user_handled_at",
         ]
+
+    def get_handled(self, obj) -> bool | None:
+        has_attr = hasattr(obj, "user_has_swipe")
+        if not has_attr:
+            return None
+        return bool(getattr(obj, "user_has_swipe"))
+
+    def get_user_action(self, obj):
+        return getattr(obj, "user_action", None)
+
+    def get_user_note(self, obj):
+        value = getattr(obj, "user_note", None)
+        return value if value not in {"", None} else None
+
+    def get_user_handled_at(self, obj):
+        return getattr(obj, "user_handled_at", None)
 
 
 class SwipeActionSerializer(serializers.ModelSerializer):
@@ -158,6 +187,9 @@ class DailySummarySerializer(serializers.Serializer):
     """Serializer representing the team summary output."""
 
     date = serializers.DateField()
+    window = serializers.CharField()
+    start_date = serializers.DateField()
+    end_date = serializers.DateField()
     total_actions = serializers.IntegerField()
     unique_users = serializers.IntegerField()
     like_count = serializers.IntegerField()

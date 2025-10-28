@@ -1,8 +1,10 @@
+import { useEffect, useState } from "react";
 import { format, parseISO } from "date-fns";
 import useSWR from "swr";
 import { motion } from "framer-motion";
 import { api } from "../utils/api";
 import type { PaginatedResponse, SwipeActionRecord } from "../types";
+import { LikeReasonDialog } from "./LikeReasonDialog";
 
 interface MyLikesViewProps {
   isAuthenticated: boolean;
@@ -10,11 +12,22 @@ interface MyLikesViewProps {
 }
 
 export function MyLikesView({ isAuthenticated, onRequireSignIn }: MyLikesViewProps) {
-  const { data, error, isLoading } = useSWR<PaginatedResponse<SwipeActionRecord>>(
+  const { data, error, isLoading, mutate } = useSWR<PaginatedResponse<SwipeActionRecord>>(
     isAuthenticated ? "my-likes" : null,
     () => api.listSwipes({ action: "like" }),
     { revalidateOnFocus: false }
   );
+
+  const [feedback, setFeedback] = useState<{ message: string; tone: "positive" | "neutral" } | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [selectedLike, setSelectedLike] = useState<SwipeActionRecord | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!feedback) return;
+    const timer = window.setTimeout(() => setFeedback(null), 2600);
+    return () => window.clearTimeout(timer);
+  }, [feedback]);
 
   if (!isAuthenticated) {
     return (
@@ -47,6 +60,65 @@ export function MyLikesView({ isAuthenticated, onRequireSignIn }: MyLikesViewPro
 
   const likes = data?.results ?? [];
 
+  const handleRemove = async (like: SwipeActionRecord) => {
+    if (saving) return;
+    setSaving(true);
+    setFeedback(null);
+    try {
+      await api.createSwipe({
+        game: like.game,
+        batch: like.batch ?? null,
+        action: "skip",
+        note: "",
+      });
+      await mutate();
+      setFeedback({ message: `${like.game_detail?.name ?? "Game"} removed from likes.`, tone: "neutral" });
+    } catch (err) {
+      console.error("Remove like failed", err);
+      setFeedback({ message: "Could not remove like. Try again.", tone: "neutral" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleEditNote = (like: SwipeActionRecord) => {
+    if (saving) return;
+    setSelectedLike(like);
+    setDialogOpen(true);
+    setFeedback(null);
+  };
+
+  const handleSubmitNote = async (note: string) => {
+    if (!selectedLike) return;
+    setSaving(true);
+    try {
+      await api.createSwipe({
+        game: selectedLike.game,
+        batch: selectedLike.batch ?? null,
+        action: "like",
+        note,
+      });
+      await mutate();
+      setFeedback({
+        message: note ? "Reason saved." : "Reason cleared.",
+        tone: "positive",
+      });
+      setDialogOpen(false);
+      setSelectedLike(null);
+    } catch (err) {
+      console.error("Save like reason failed", err);
+      setFeedback({ message: "Could not save the reason. Try again.", tone: "neutral" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCloseDialog = () => {
+    if (saving) return;
+    setDialogOpen(false);
+    setSelectedLike(null);
+  };
+
   return (
     <section className="mx-auto w-full max-w-3xl px-4 py-8 sm:py-10">
       <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -58,6 +130,16 @@ export function MyLikesView({ isAuthenticated, onRequireSignIn }: MyLikesViewPro
           Total {likes.length}
         </span>
       </header>
+
+      {feedback && (
+        <div
+          className={`mt-6 rounded-2xl px-4 py-3 text-sm ${
+            feedback.tone === "positive" ? "bg-green-500/15 text-green-200" : "bg-white/5 text-mist-subtle/80"
+          }`}
+        >
+          {feedback.message}
+        </div>
+      )}
 
       {isLoading ? (
         <div className="mt-10 flex flex-col items-center justify-center gap-4">
@@ -98,14 +180,51 @@ export function MyLikesView({ isAuthenticated, onRequireSignIn }: MyLikesViewPro
                     </a>
                   )}
                 </div>
-                {like.note && (
+                {like.note ? (
                   <p className="mt-3 rounded-2xl bg-white/5 px-4 py-3 text-sm text-mist-subtle/85">{like.note}</p>
+                ) : (
+                  <p className="mt-3 rounded-2xl bg-white/5 px-4 py-3 text-sm text-mist-subtle/60 italic">
+                    No reason recorded yet.
+                  </p>
                 )}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleEditNote(like)}
+                    disabled={saving}
+                    className="rounded-full bg-white/5 px-3 py-1.5 text-xs text-mist-subtle/85 hover:bg-white/10 hover:text-white transition disabled:opacity-40"
+                  >
+                    Edit note
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleRemove(like)}
+                    disabled={saving}
+                    className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-mist-subtle/80 hover:bg-white/10 hover:text-white transition disabled:opacity-40"
+                  >
+                    Remove like
+                  </button>
+                </div>
               </li>
             );
           })}
         </ul>
       )}
+
+      <LikeReasonDialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          if (open) {
+            setDialogOpen(true);
+          } else {
+            handleCloseDialog();
+          }
+        }}
+        defaultNote={selectedLike?.note ?? ""}
+        onSubmit={handleSubmitNote}
+        onSkip={handleCloseDialog}
+        submitting={saving}
+      />
     </section>
   );
 }

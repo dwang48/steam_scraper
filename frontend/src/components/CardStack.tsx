@@ -8,7 +8,10 @@ interface CardStackProps {
   snapshots: GameSnapshot[];
   activeIndex: number;
   onActiveIndexChange: (nextIndex: number) => void;
-  onSwipe: (snapshot: GameSnapshot, action: SwipeActionType) => Promise<boolean> | boolean;
+  onSwipe: (
+    snapshot: GameSnapshot,
+    action: SwipeActionType
+  ) => Promise<boolean | { success: boolean; advance?: boolean }> | boolean | { success: boolean; advance?: boolean };
   onOpenDetails: (snapshot: GameSnapshot) => void;
 }
 
@@ -32,20 +35,27 @@ export function CardStack({ snapshots, activeIndex, onActiveIndexChange, onSwipe
         return;
       }
       setProcessing(true);
-      let result = false;
+      let result: boolean | { success: boolean; advance?: boolean } = false;
       try {
         result = await onSwipe(activeSnapshot, action);
       } catch (error) {
         console.error("Swipe handler failed", error);
       }
-      if (!result) {
+      const outcome =
+        typeof result === "object" && result !== null
+          ? { success: Boolean(result.success), advance: result.advance }
+          : { success: Boolean(result), advance: undefined };
+      if (!outcome.success) {
         setProcessing(false);
         return;
       }
       setDirection(action === "like" ? "right" : "left");
+      const shouldAdvance = outcome.advance ?? outcome.success;
       setTimeout(() => {
-        const nextIndex = activeIndex + 1;
-        onActiveIndexChange(nextIndex);
+        if (shouldAdvance) {
+          const nextIndex = activeIndex + 1;
+          onActiveIndexChange(nextIndex);
+        }
         setDirection(null);
         setProcessing(false);
       }, 260);

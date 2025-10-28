@@ -57,12 +57,20 @@ export function DetailSheet({ snapshot, open, onOpenChange }: DetailSheetProps) 
   const detectionStageLabel = renderSnapshot?.detection_stage
     ? renderSnapshot.detection_stage.replace("_", " ")
     : "Unknown stage";
-  const imageCandidates = useMemo(
-    () => (renderSnapshot ? getSteamImageCandidates(renderSnapshot.game.steam_appid) : []),
-    [renderSnapshot?.game.steam_appid]
-  );
+  const imageCandidates = useMemo(() => {
+    if (!renderSnapshot) return [];
+    const preferred: string[] = [];
+    const { game } = renderSnapshot;
+    if (game.header_image_url) preferred.push(game.header_image_url);
+    if (game.capsule_image_url) preferred.push(game.capsule_image_url);
+    if (game.background_image_url) preferred.push(game.background_image_url);
+    const fallbacks = getSteamImageCandidates(game.steam_appid);
+    return Array.from(new Set([...preferred, ...fallbacks]));
+  }, [renderSnapshot]);
 
   const detailImageSrc = imageCandidates[detailImageIndex] ?? "";
+  const screenshots = renderSnapshot?.game.screenshot_urls ?? [];
+  const trailers = renderSnapshot?.game.trailer_videos ?? [];
   const initials = useMemo(() => {
     if (!renderSnapshot) return "";
     const words = (renderSnapshot.game.name || "").split(/\s+/).filter(Boolean);
@@ -135,12 +143,12 @@ export function DetailSheet({ snapshot, open, onOpenChange }: DetailSheetProps) 
                 </p>
               </header>
 
-              <div className="overflow-hidden rounded-2xl border border-white/5 bg-ink-softer/70">
+              <div className="overflow-hidden rounded-2xl border border-white/5 bg-ink-softer/70 aspect-[16/9] w-full max-w-3xl mx-auto">
                 {detailImageSrc && !detailImageFailed ? (
                   <img
                     src={detailImageSrc}
                     alt={`${renderSnapshot.game.name} artwork`}
-                    className="w-full object-cover"
+                    className="h-full w-full object-cover"
                     loading="lazy"
                     onError={() => {
                       if (detailImageIndex + 1 < imageCandidates.length) {
@@ -151,7 +159,7 @@ export function DetailSheet({ snapshot, open, onOpenChange }: DetailSheetProps) 
                     }}
                   />
                 ) : (
-                  <div className="flex h-40 items-center justify-center bg-gradient-to-br from-ink via-ink-soft to-ink-dark text-3xl font-semibold text-mist/80">
+                  <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-ink via-ink-soft to-ink-dark text-3xl font-semibold text-mist/80">
                     {initials}
                   </div>
                 )}
@@ -169,9 +177,56 @@ export function DetailSheet({ snapshot, open, onOpenChange }: DetailSheetProps) 
                 <InfoBlock label="Detection stage" value={detectionStageLabel} />
                 <InfoBlock label="Categories" value={formatList(renderSnapshot.source_categories)} />
                 <InfoBlock label="Genres" value={formatList(renderSnapshot.source_genres)} />
-                <InfoBlock label="Languages" value={renderSnapshot.supported_languages || "Unknown"} />
+                <InfoBlock label="Languages" value={formatList(renderSnapshot.supported_languages)} />
                 <InfoBlock label="Developers" value={renderSnapshot.game.developers || "Unknown"} />
               </section>
+
+              {screenshots.length > 0 && (
+                <section className="space-y-3">
+                  <h3 className="uppercase text-xs tracking-[0.35em] text-mist-subtle/70">Screenshots</h3>
+                  <div className="flex gap-3 overflow-x-auto pb-2">
+                    {screenshots.slice(0, 6).map((url) => (
+                      <img
+                        key={url}
+                        src={url}
+                        alt={`${renderSnapshot.game.name} screenshot`}
+                        className="h-32 w-auto rounded-2xl border border-white/10 object-cover sm:h-40"
+                        loading="lazy"
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {trailers.length > 0 && (
+                <section className="space-y-3">
+                  <h3 className="uppercase text-xs tracking-[0.35em] text-mist-subtle/70">Videos</h3>
+                  <div className="grid gap-4">
+                    {trailers.slice(0, 2).map((clip, index) => {
+                      const key = clip?.id ?? clip?.mp4 ?? clip?.webm ?? `${index}`;
+                      return (
+                        <div key={key} className="space-y-2">
+                          <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
+                            <video
+                              controls
+                              poster={clip?.thumbnail ?? undefined}
+                              className="w-full h-auto max-h-72"
+                              preload="metadata"
+                            >
+                              {clip?.mp4 && <source src={clip.mp4} type="video/mp4" />}
+                              {clip?.webm && <source src={clip.webm} type="video/webm" />}
+                              Your browser does not support the video tag.
+                            </video>
+                          </div>
+                          {clip?.name && (
+                            <p className="text-xs uppercase tracking-[0.3em] text-mist-subtle/70">{clip.name}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
 
               <div className="flex gap-3">
                 {steamStoreUrl && (
@@ -243,6 +298,11 @@ function InfoBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
-function formatList(value: string) {
-  return value ? value.split(/[;|,]/).map((item) => item.trim()).filter(Boolean).join(" · ") : "Unknown";
+function formatList(value?: string | null) {
+  if (!value) return "Unknown";
+  const cleaned = value
+    .split(/[;|,]/)
+    .map((item) => item.trim().replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, ""))
+    .filter(Boolean);
+  return cleaned.length ? cleaned.join(" · ") : "Unknown";
 }

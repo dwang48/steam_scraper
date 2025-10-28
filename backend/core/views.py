@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import io
 import logging
-from datetime import datetime
-from typing import Dict, Optional, Tuple
+from datetime import datetime, timedelta, date
+from calendar import monthrange
+from typing import Dict, Optional, Tuple, List
+from itertools import combinations
 
 import requests
 import xlsxwriter
@@ -16,12 +18,12 @@ from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.http import HttpResponse
 from django.middleware.csrf import get_token
 from django.utils import timezone
-from django.db.models import Max
-from rest_framework import mixins, permissions, status, viewsets
+from django.db.models import Exists, Max, OuterRef, Subquery
+from rest_framework import authentication, mixins, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from . import models, serializers
+from . import models, serializers, authentication as core_auth
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -80,11 +82,16 @@ def _ensure_watchlist_entry(swipe: models.SwipeAction) -> None:
     entry.save(update_fields=["status_history", "current_status", "last_checked", "check_count", "latest_name", "metadata"])
 
 
-def _build_daily_summary(target_date):
-    """Aggregate swipe actions for a target date."""
+def _build_daily_summary(target_date, start_date: Optional[date] = None, end_date: Optional[date] = None, window: str = "day"):
+    """Aggregate swipe actions for a target date or window."""
+
+    start = start_date or target_date
+    finish = end_date or target_date
+    if start > finish:
+        start, finish = finish, start
 
     swipes = (
-        models.SwipeAction.objects.filter(created_at__date=target_date, user__isnull=False)
+        models.SwipeAction.objects.filter(created_at__date__range=(start, finish), user__isnull=False)
         .select_related("game", "user")
         .order_by("game__name", "created_at")
     )
@@ -146,6 +153,9 @@ def _build_daily_summary(target_date):
 
     summary = {
         "date": target_date,
+        "window": window,
+        "start_date": start,
+        "end_date": finish,
         "total_actions": like_count + skip_count + watchlist_count,
         "unique_users": len(unique_user_ids),
         "like_count": like_count,
@@ -256,6 +266,7 @@ class AuthViewSet(viewsets.ViewSet):
     """Session-based authentication endpoints."""
 
     permission_classes = [permissions.AllowAny]
+    authentication_classes = [core_auth.CsrfExemptSessionAuthentication, authentication.BasicAuthentication]
 
     def list(self, request):
         if request.user.is_authenticated:
@@ -360,6 +371,22 @@ class GameSnapshotViewSet(viewsets.ReadOnlyModelViewSet):
         if source:
             qs = qs.filter(batch__source_name=source)
 
+        user = getattr(self.request, "user", None)
+        if user and user.is_authenticated:
+            swipe_subquery = models.SwipeAction.objects.filter(
+                user=user,
+                game_id=OuterRef("game_id"),
+            ).order_by("-created_at", "-id")
+            qs = qs.annotate(
+                user_has_swipe=Exists(swipe_subquery),
+                user_action=Subquery(swipe_subquery.values("action")[:1]),
+                user_note=Subquery(swipe_subquery.values("note")[:1]),
+                user_handled_at=Subquery(swipe_subquery.values("created_at")[:1]),
+            )
+            exclude_handled = self.request.query_params.get("exclude_handled")
+            if exclude_handled and exclude_handled.lower() in {"1", "true", "yes"}:
+                qs = qs.filter(user_has_swipe=False)
+
         return qs
 
 
@@ -368,6 +395,7 @@ class SwipeActionViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewset
 
     serializer_class = serializers.SwipeActionSerializer
     permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [core_auth.CsrfExemptSessionAuthentication, authentication.BasicAuthentication]
 
     def get_queryset(self):
         qs = (
@@ -388,9 +416,33 @@ class SwipeActionViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewset
             if target_date:
                 qs = qs.filter(created_at__date=target_date)
         return qs
-
     def perform_create(self, serializer):
-        swipe = serializer.save(user=self.request.user)
+        data = serializer.validated_data
+        existing = (
+            models.SwipeAction.objects.filter(user=self.request.user, game=data["game"])
+            .order_by("-created_at", "-id")
+            .first()
+        )
+        if existing:
+            fields_to_update = []
+            if existing.action != data["action"]:
+                existing.action = data["action"]
+                fields_to_update.append("action")
+            if "note" in data:
+                existing.note = data.get("note") or ""
+                fields_to_update.append("note")
+            batch = data.get("batch")
+            if batch is not None and batch != existing.batch:
+                existing.batch = batch
+                fields_to_update.append("batch")
+            existing.created_at = timezone.now()
+            fields_to_update.append("created_at")
+            if fields_to_update:
+                existing.save(update_fields=fields_to_update)
+            serializer.instance = existing
+            swipe = existing
+        else:
+            swipe = serializer.save(user=self.request.user)
         if swipe.action == models.SwipeAction.ACTION_WATCHLIST:
             _ensure_watchlist_entry(swipe)
 
@@ -421,16 +473,35 @@ class ReportViewSet(viewsets.ViewSet):
         date_param = request.query_params.get("date") or request.data.get("date")
         return _parse_iso_date(date_param, today)
 
+    def _resolve_window(self, target_date: date, window_param: Optional[str]):
+        window_value = (window_param or "day").lower()
+        if window_value == "week":
+            start_date = target_date - timedelta(days=6)
+            end_date = target_date
+        elif window_value == "month":
+            start_date = target_date.replace(day=1)
+            last_day = monthrange(target_date.year, target_date.month)[1]
+            end_date = target_date.replace(day=last_day)
+        else:
+            window_value = "day"
+            start_date = target_date
+            end_date = target_date
+        return window_value, start_date, end_date
+
     @action(detail=False, methods=["get"], url_path="daily-summary")
     def daily_summary(self, request):
         target_date = self._determine_date(request)
-        summary = _build_daily_summary(target_date)
+        window_param = request.query_params.get("window")
+        window_value, start_date, end_date = self._resolve_window(target_date, window_param)
+        summary = _build_daily_summary(target_date, start_date=start_date, end_date=end_date, window=window_value)
         return Response(summary)
 
     @action(detail=False, methods=["get"], url_path="daily-summary/export")
     def daily_summary_export(self, request):
         target_date = self._determine_date(request)
-        summary = _build_daily_summary(target_date)
+        window_param = request.query_params.get("window")
+        window_value, start_date, end_date = self._resolve_window(target_date, window_param)
+        summary = _build_daily_summary(target_date, start_date=start_date, end_date=end_date, window=window_value)
         workbook_bytes = _build_daily_summary_workbook(summary)
         filename = f"steam-daily-summary-{target_date.strftime(DATE_FMT)}.xlsx"
         response = HttpResponse(
@@ -443,10 +514,103 @@ class ReportViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["post"], url_path="daily-summary/push")
     def daily_summary_push(self, request):
         target_date = self._determine_date(request)
-        summary = _build_daily_summary(target_date)
+        window_param = request.data.get("window") or request.query_params.get("window")
+        window_value, start_date, end_date = self._resolve_window(target_date, window_param)
+        summary = _build_daily_summary(target_date, start_date=start_date, end_date=end_date, window=window_value)
         success, message = _push_summary_to_feishu(summary)
         status_code = status.HTTP_200_OK if success else status.HTTP_400_BAD_REQUEST
         return Response({"success": success, "message": message}, status=status_code)
+
+    @action(detail=False, methods=["get"], url_path="leaderboard")
+    def leaderboard(self, request):
+        target_date = self._determine_date(request)
+        window_param = request.query_params.get("window")
+        window_value, start_date, end_date = self._resolve_window(target_date, window_param)
+
+        swipes = (
+            models.SwipeAction.objects.filter(created_at__date__range=(start_date, end_date), user__isnull=False)
+            .select_related("user", "game")
+            .order_by("user_id", "-created_at")
+        )
+
+        total_actions = 0
+        unique_games = set()
+        user_cache: Dict[int, dict] = {}
+        member_map: Dict[int, dict] = {}
+        like_sets: Dict[int, set] = {}
+
+        for swipe in swipes:
+            total_actions += 1
+            unique_games.add(swipe.game_id)
+            stats = member_map.get(swipe.user_id)
+            if not stats:
+                stats = {
+                    "user": _serialize_user(swipe.user, user_cache),
+                    "handled_games": set(),
+                    "like_count": 0,
+                    "skip_count": 0,
+                    "watchlist_count": 0,
+                    "total_actions": 0,
+                    "last_action_at": swipe.created_at,
+                }
+                member_map[swipe.user_id] = stats
+
+            stats["total_actions"] += 1
+            stats["handled_games"].add(swipe.game_id)
+            if swipe.action == models.SwipeAction.ACTION_LIKE:
+                stats["like_count"] += 1
+                like_sets.setdefault(swipe.user_id, set()).add(swipe.game_id)
+            elif swipe.action == models.SwipeAction.ACTION_SKIP:
+                stats["skip_count"] += 1
+            elif swipe.action == models.SwipeAction.ACTION_WATCHLIST:
+                stats["watchlist_count"] += 1
+
+            if swipe.created_at and swipe.created_at > stats["last_action_at"]:
+                stats["last_action_at"] = swipe.created_at
+
+        member_stats: List[dict] = []
+        for user_id, stats in member_map.items():
+            handled_games = stats.pop("handled_games")
+            stats["handled_games"] = len(handled_games)
+            stats["last_action_at"] = stats["last_action_at"].isoformat() if stats["last_action_at"] else None
+            member_stats.append(stats)
+
+        member_stats.sort(key=lambda item: (item["handled_games"], item["like_count"], item["total_actions"]), reverse=True)
+
+        overlap_pairs: List[dict] = []
+        like_items = list(like_sets.items())
+        for (user_a_id, likes_a), (user_b_id, likes_b) in combinations(like_items, 2):
+            intersection = likes_a & likes_b
+            if not intersection:
+                continue
+            union = likes_a | likes_b
+            jaccard = len(intersection) / len(union) if union else 0.0
+            overlap_pairs.append(
+                {
+                    "user_a": member_map[user_a_id]["user"],
+                    "user_b": member_map[user_b_id]["user"],
+                    "shared_likes": len(intersection),
+                    "union_size": len(union),
+                    "jaccard": round(jaccard, 4),
+                }
+            )
+
+        overlap_pairs.sort(key=lambda item: (item["jaccard"], item["shared_likes"]), reverse=True)
+        overlap_pairs = overlap_pairs[:15]
+
+        payload = {
+            "date": target_date.isoformat(),
+            "window": window_value,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "total_actions": total_actions,
+            "unique_games": len(unique_games),
+            "member_count": len(member_stats),
+            "member_stats": member_stats,
+            "overlap_pairs": overlap_pairs,
+        }
+
+        return Response(payload)
 
 
 class WishlistMomentumViewSet(viewsets.ReadOnlyModelViewSet):

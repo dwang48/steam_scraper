@@ -1,10 +1,12 @@
 import clsx from "clsx";
+import { getAdminUrl } from "../utils/admin";
 
-export type AppView = "daily" | "team" | "personal";
+export type AppView = "daily" | "team" | "leaderboard" | "personal";
 
 const NAV_ITEMS: Array<{ key: AppView; label: string }> = [
   { key: "daily", label: "Daily Picks" },
   { key: "team", label: "Team Likes" },
+  { key: "leaderboard", label: "Leaderboard" },
   { key: "personal", label: "My Likes" }
 ];
 
@@ -14,7 +16,7 @@ interface PrimaryNavProps {
 }
 
 export function PrimaryNav({ activeView, onChange }: PrimaryNavProps) {
-  const adminUrl = import.meta.env.VITE_ADMIN_URL ?? "http://localhost:8000/admin/";
+  const adminUrl = getAdminUrl();
 
   return (
     <nav className="sticky top-0 z-50 bg-ink/95 backdrop-blur-xl border-b border-white/5">

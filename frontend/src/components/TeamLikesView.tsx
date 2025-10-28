@@ -17,13 +17,14 @@ function useTodayString() {
 export function TeamLikesView({ isAuthenticated, onRequireSignIn }: TeamLikesViewProps) {
   const today = useTodayString();
   const [selectedDate, setSelectedDate] = useState(today);
+  const [windowSize, setWindowSize] = useState<"day" | "week" | "month">("day");
 
   const shouldFetch = isAuthenticated;
   const { data, error, isLoading } = useSWR<DailySummary>(
-    shouldFetch ? ["daily-summary", selectedDate] : null,
+    shouldFetch ? ["daily-summary", selectedDate, windowSize] : null,
     (key) => {
-      const [, date] = key as [string, string];
-      return api.dailySummary({ date });
+      const [, date, range] = key as [string, string, "day" | "week" | "month"];
+      return api.dailySummary({ date, window: range });
     },
     { revalidateOnFocus: false }
   );
@@ -32,6 +33,23 @@ export function TeamLikesView({ isAuthenticated, onRequireSignIn }: TeamLikesVie
     () => (data?.games ?? []).filter((entry) => entry.like_users.length > 0),
     [data?.games]
   );
+
+  const rangeLabel = useMemo(() => {
+    if (!data) return "";
+    try {
+      const start = parseISO(data.start_date);
+      const end = parseISO(data.end_date);
+      if (data.window === "month") {
+        return format(start, "LLLL yyyy");
+      }
+      if (data.window === "week") {
+        return `${format(start, "MMM d")} – ${format(end, "MMM d, yyyy")}`;
+      }
+      return format(end, "MMM d, yyyy");
+    } catch {
+      return "";
+    }
+  }, [data]);
 
   if (!isAuthenticated) {
     return (
@@ -67,18 +85,39 @@ export function TeamLikesView({ isAuthenticated, onRequireSignIn }: TeamLikesVie
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-mist">Team likes overview</h1>
-          <p className="mt-1 text-sm text-mist-subtle/70">See who liked each game on the selected date.</p>
+          <p className="mt-1 text-sm text-mist-subtle/70">
+            {windowSize === "day"
+              ? "See who liked each game on the selected date."
+              : "See who liked each game across the selected range."}
+          </p>
+          {rangeLabel && (
+            <p className="mt-1 text-xs uppercase tracking-[0.3em] text-mist-subtle/60">{rangeLabel}</p>
+          )}
         </div>
-        <label className="flex flex-col text-xs uppercase tracking-[0.35em] text-mist-subtle/60">
-          Select date
-          <input
-            type="date"
-            value={selectedDate}
-            onChange={(event) => setSelectedDate(event.target.value)}
-            max={today}
-            className="mt-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-mist focus:outline-none focus:ring-2 focus:ring-accent/60"
-          />
-        </label>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <label className="flex flex-col text-xs uppercase tracking-[0.35em] text-mist-subtle/60">
+            Select date
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(event) => setSelectedDate(event.target.value)}
+              max={today}
+              className="mt-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-mist focus:outline-none focus:ring-2 focus:ring-accent/60"
+            />
+          </label>
+          <label className="flex flex-col text-xs uppercase tracking-[0.35em] text-mist-subtle/60">
+            Range
+            <select
+              value={windowSize}
+              onChange={(event) => setWindowSize(event.target.value as "day" | "week" | "month")}
+              className="mt-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-mist focus:outline-none focus:ring-2 focus:ring-accent/60"
+            >
+              <option value="day">Single day</option>
+              <option value="week">Last 7 days</option>
+              <option value="month">This month</option>
+            </select>
+          </label>
+        </div>
       </header>
 
       <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -104,7 +143,7 @@ export function TeamLikesView({ isAuthenticated, onRequireSignIn }: TeamLikesVie
       ) : (
         <ul className="mt-8 space-y-4">
           {likeEntries.map((entry) => {
-            const displayDate = data?.date ? format(parseISO(data.date), "MMM d, yyyy") : "";
+            const displayDate = rangeLabel;
             const likeNames = entry.like_users.map((user) => user.display_name || user.username || "Member").join(", ");
             const steamUrl = entry.game.steam_url;
             return (

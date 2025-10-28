@@ -1,3 +1,4 @@
+import { format, parseISO } from "date-fns";
 import { motion } from "framer-motion";
 import clsx from "clsx";
 import { useEffect, useMemo, useState } from "react";
@@ -13,6 +14,7 @@ interface GameCardProps {
 
 export function GameCard({ snapshot, active, offset = 0, onShowDetails }: GameCardProps) {
   const { game } = snapshot;
+  const isHandled = snapshot.handled ?? false;
 
   const steamStoreUrl = useMemo(
     () => getSteamStoreUrl(game.steam_appid, game.steam_url),
@@ -22,10 +24,15 @@ export function GameCard({ snapshot, active, offset = 0, onShowDetails }: GameCa
     ? snapshot.detection_stage.replace("_", " ")
     : "Unknown stage";
 
-  const imageCandidates = useMemo(
-    () => getSteamImageCandidates(game.steam_appid),
-    [game.steam_appid]
-  );
+  const imageCandidates = useMemo(() => {
+    const screenshots = (game.screenshot_urls ?? []).slice(0, 4);
+    const preferred: string[] = [...screenshots];
+    if (game.capsule_image_url) preferred.push(game.capsule_image_url);
+    if (game.header_image_url) preferred.push(game.header_image_url);
+    if (game.background_image_url) preferred.push(game.background_image_url);
+    const fallbacks = getSteamImageCandidates(game.steam_appid);
+    return Array.from(new Set([...preferred, ...fallbacks]));
+  }, [game.background_image_url, game.capsule_image_url, game.header_image_url, game.screenshot_urls, game.steam_appid]);
   const [imageIndex, setImageIndex] = useState(0);
   const [imageFailed, setImageFailed] = useState(false);
 
@@ -47,12 +54,34 @@ export function GameCard({ snapshot, active, offset = 0, onShowDetails }: GameCa
     .map((tag) => tag.trim())
     .filter(Boolean)
     .slice(0, 4);
+  const handledAtLabel = useMemo(() => {
+    const handledAt = snapshot.user_handled_at;
+    if (!handledAt) return "";
+    try {
+      return format(parseISO(handledAt), "MMM d");
+    } catch {
+      return "";
+    }
+  }, [snapshot.user_handled_at]);
+  const handledActionLabel = useMemo(() => {
+    switch (snapshot.user_action) {
+      case "like":
+        return "Liked";
+      case "watchlist":
+        return "Watchlisted";
+      case "skip":
+        return "Skipped";
+      default:
+        return "";
+    }
+  }, [snapshot.user_action]);
 
   return (
     <motion.article
       className={clsx(
         "glass-panel card-gradient w-full h-full px-4 py-4 sm:px-6 sm:py-8 flex flex-col gap-3 sm:gap-6",
-        active ? "shadow-glass" : "opacity-80"
+        active ? "shadow-glass" : "opacity-80",
+        isHandled && !active && "opacity-70"
       )}
       style={{
         transformOrigin: "center",
@@ -64,6 +93,12 @@ export function GameCard({ snapshot, active, offset = 0, onShowDetails }: GameCa
     >
       <div>
         <div className="relative aspect-[16/9] w-full overflow-hidden rounded-2xl bg-ink-softer/80">
+          {isHandled && handledActionLabel && (
+            <div className="absolute left-2 top-2 z-20 rounded-full bg-black/70 px-2 py-0.5 text-[0.625rem] text-mist-subtle/90 backdrop-blur-sm">
+              {handledActionLabel}
+              {handledAtLabel ? ` • ${handledAtLabel}` : ""}
+            </div>
+          )}
           {currentImageSrc && !imageFailed ? (
             <img
               src={currentImageSrc}
