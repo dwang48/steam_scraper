@@ -1,0 +1,10 @@
+[2025-10-28 22:35:37 +0000] [964676] [INFO] Starting gunicorn 23.0.0
+[2025-10-28 22:35:37 +0000] [964676] [INFO] Listening at: http://0.0.0.0:8000 (964676)
+[2025-10-28 22:35:37 +0000] [964676] [INFO] Using worker: sync
+[2025-10-28 22:35:37 +0000] [964677] [INFO] Booting worker with pid: 964677
+[2025-10-28 22:35:37 +0000] [964678] [INFO] Booting worker with pid: 964678
+[2025-10-28 22:35:37 +0000] [964679] [INFO] Booting worker with pid: 964679
+[2025-10-28 22:35:46 +0000] [964676] [INFO] Handling signal: int
+[2025-10-28 22:35:46 +0000] [964677] [INFO] Worker exiting (pid: 964677)
+[2025-10-28 22:35:46 +0000] [964678] [INFO] Worker exiting (pid: 964678)
+[2025-10-28 22:35:46 +0000] [964676] [INFO] Shutting down: Master

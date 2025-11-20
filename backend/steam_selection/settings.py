@@ -18,11 +18,11 @@ environ.Env.read_env(env_file=BASE_DIR.parent / ".env")
 # Core settings
 SECRET_KEY = env("DJANGO_SECRET_KEY", default="change-me-in-production")
 DEBUG = env("DJANGO_DEBUG")
-ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["*"] if DEBUG else [])
-
+#ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["*"] if DEBUG else [])
+ALLOWED_HOSTS = ["34.235.149.243", "localhost", "127.0.0.1"]
 # Applications
 INSTALLED_APPS = [
-    "simpleui",
+    #"simpleui",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -94,9 +94,9 @@ USE_L10N = False
 USE_TZ = True
 
 # Static files
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-MEDIA_URL = "media/"
+MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 # Default primary key field type
@@ -122,6 +122,7 @@ CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[
     "http://127.0.0.1:5173",
     "http://127.0.0.1:3000",
     "https://a7729fd21d33.ngrok-free.app",
+    "http://34.235.149.243:5173"
 ])
 
 CORS_ALLOW_CREDENTIALS = True  # 允许携带cookie（用于session认证）
@@ -135,6 +136,7 @@ CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[
     "http://10.251.1.1:5173",
     "http://169.254.125.8:5173",
     "https://a7729fd21d33.ngrok-free.app",
+    "http://34.235.149.243:8000"
 ])
 # Session配置
 # 如果使用ngrok HTTPS，设置 USE_HTTPS=True
