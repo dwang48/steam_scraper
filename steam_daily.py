@@ -14,6 +14,7 @@ from dateutil import parser as dateparser
 from difflib import SequenceMatcher
 from xml.etree import ElementTree as ET
 import time
+import random
 import html
 
 import requests
@@ -21,7 +22,11 @@ from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Constants
-APPLIST_URL = "https://api.steampowered.com/ISteamApps/GetAppList/v2/"
+LEGACY_APPLIST_URLS = [
+    "https://api.steampowered.com/ISteamApps/GetAppList/v2/",
+    "https://api.steampowered.com/ISteamApps/GetAppList/v0002/?format=json",
+]
+STORE_APP_LIST_URL = "https://api.steampowered.com/IStoreService/GetAppList/v1/"
 DETAILS_URL_TEMPLATE = "https://store.steampowered.com/api/appdetails?appids={appid}&cc=us&l=en"
 FOLLOWER_URL = "https://steamcommunity.com/games/{appid}/memberslistxml/?xml=1"
 STEAMDB_URL = "https://steamdb.info/app/{appid}/"
@@ -102,13 +107,107 @@ logging.basicConfig(
 logger = logging.getLogger("steam_daily")
 
 MAX_WORKERS = int(os.environ.get("MAX_WORKERS", "32"))
+APPLIST_PAGE_SIZE = int(os.environ.get("APPLIST_PAGE_SIZE", "50000"))
+STEAM_API_KEY = os.environ.get("STEAM_API_KEY") or os.environ.get("WEBAPI_KEY")
+
+
+def _env_flag(name: str, default: str = "true") -> bool:
+    return os.environ.get(name, default).lower() in {"1", "true", "yes", "on"}
+
+
+FOLLOWER_FETCH_ENABLED = _env_flag("FETCH_FOLLOWERS", "true")
+try:
+    FOLLOWER_SAMPLE_RATE = float(os.environ.get("FOLLOWER_SAMPLE_RATE", "1.0"))
+except ValueError:
+    FOLLOWER_SAMPLE_RATE = 1.0
+FOLLOWER_SAMPLE_RATE = max(0.0, min(1.0, FOLLOWER_SAMPLE_RATE))
+FOLLOWER_FETCH_DELAY = float(os.environ.get("FOLLOWER_FETCH_DELAY", "0.0"))
+
+WISHLIST_RANK_FETCH_ENABLED = _env_flag("FETCH_WISHLIST_RANK", "true")
+WISHLIST_RANK_MIN_FOLLOWERS = int(os.environ.get("WISHLIST_RANK_MIN_FOLLOWERS", "100"))
+WISHLIST_RANK_DELAY = float(os.environ.get("WISHLIST_RANK_DELAY", "0.5"))
+
+def fetch_applist_via_store_service(api_key: str, page_size: int = 50000) -> List[Dict]:
+    """Fetch applist via IStoreService (requires a Steam Web API key)."""
+    apps: List[Dict] = []
+    last_appid = 0
+    page_size = min(page_size, 50000)  # API caps at 50k per page
+
+    while True:
+        params = {
+            "key": api_key,
+            "last_appid": last_appid,
+            "max_results": page_size,
+            "include_games": True,
+            "include_dlc": True,
+            "include_software": True,
+            "include_videos": False,
+            "include_hardware": False,
+        }
+        resp = requests.get(STORE_APP_LIST_URL, params=params, timeout=60)
+        resp.raise_for_status()
+        data = resp.json()
+        chunk = data.get("response", {}).get("apps", []) or []
+        if not chunk:
+            break
+        apps.extend(chunk)
+        last_appid = chunk[-1].get("appid", last_appid)
+        if len(chunk) < page_size:
+            break
+
+    return apps
+
 
 def fetch_full_applist() -> List[Dict]:
-    """Download the full Steam app list."""
-    resp = requests.get(APPLIST_URL, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
-    return data.get("applist", {}).get("apps", [])
+    """Download the full Steam app list with fallbacks and caching."""
+    # 1) Preferred: IStoreService (needs STEAM_API_KEY)
+    if STEAM_API_KEY:
+        try:
+            apps = fetch_applist_via_store_service(STEAM_API_KEY, page_size=APPLIST_PAGE_SIZE)
+            if apps:
+                return apps
+            logger.warning("IStoreService applist returned empty payload.")
+        except Exception as exc:
+            logger.warning("IStoreService applist failed: %s", exc)
+    else:
+        logger.warning(
+            "STEAM_API_KEY not set; falling back to legacy public endpoints that are currently returning 404 from Steam."
+        )
+
+    # 2) Legacy open endpoints (recently started returning 404; kept for compatibility)
+    last_error: Optional[Exception] = None
+    for url in LEGACY_APPLIST_URLS:
+        resp = None
+        try:
+            resp = requests.get(url, timeout=60)
+            resp.raise_for_status()
+            data = resp.json()
+            apps = data.get("applist", {}).get("apps", []) or data.get("apps", [])
+            if apps:
+                if url != LEGACY_APPLIST_URLS[0]:
+                    logger.warning("Applist legacy fallback URL succeeded: %s", url)
+                return apps
+            logger.warning("Applist response empty from %s (keys: %s)", url, list(data.keys()))
+        except Exception as exc:
+            last_error = exc
+            logger.warning("Applist fetch failed from %s: %s", url, exc)
+            if resp is not None:
+                try:
+                    logger.warning("Response snippet: %s", resp.text[:200])
+                except Exception:
+                    pass
+
+    # 3) Cache fallback so the crawler still runs (won't detect new apps)
+    if KNOWN_APPS_FILE.exists():
+        logger.warning(
+            "Falling back to cached applist from %s; new apps will not be detected until network access is restored or a valid key is provided.",
+            KNOWN_APPS_FILE,
+        )
+        with KNOWN_APPS_FILE.open("r", encoding="utf-8") as f:
+            cached_ids = json.load(f)
+        return [{"appid": appid, "name": ""} for appid in cached_ids]
+
+    raise RuntimeError(f"Failed to fetch applist; last error: {last_error}")
 
 def load_known_appids() -> set:
     if KNOWN_APPS_FILE.exists():
@@ -193,8 +292,19 @@ def fetch_follower_count(appid: int, session: requests.Session = None) -> Option
     }
     try:
         resp = sess.get(FOLLOWER_URL.format(appid=appid), headers=headers, timeout=15)
+        if resp.status_code in (403, 429):
+            logging.warning(
+                "Follower fetch blocked for %s (status %s). Consider lowering MAX_WORKERS or increasing FOLLOWER_FETCH_DELAY.",
+                appid,
+                resp.status_code,
+            )
+            return None
         resp.raise_for_status()
-        xml_root = ET.fromstring(resp.text)
+        try:
+            xml_root = ET.fromstring(resp.text)
+        except ET.ParseError as parse_err:
+            logging.warning("Follower fetch parse failed for %s: %s", appid, parse_err)
+            return None
         member_tag = xml_root.find("./groupDetails/memberCount")
         return int(member_tag.text) if member_tag is not None else None
     except Exception as e:
@@ -214,6 +324,8 @@ def estimate_wishlists(followers: int, genres: Optional[List[str]] = None) -> in
 
 def fetch_wishlist_rank(appid: int, session: requests.Session = None) -> int | None:
     """获取SteamDB愿望单排名"""
+    if not WISHLIST_RANK_FETCH_ENABLED:
+        return None
     sess = session or requests.Session()
     headers = {
         "User-Agent": "Mozilla/5.0 (SteamDBBot/1.0)"
@@ -249,7 +361,15 @@ def clean_text_content(text: str) -> str:
 
 def fetch_wishlist_data(appid: int, details: Dict = None, session: requests.Session = None) -> Dict:
     """获取完整的愿望单估算数据"""
+    if not FOLLOWER_FETCH_ENABLED:
+        return {"followers": None, "wishlists_est": None, "wishlist_rank": None}
+
+    if FOLLOWER_SAMPLE_RATE < 1.0 and random.random() > FOLLOWER_SAMPLE_RATE:
+        return {"followers": None, "wishlists_est": None, "wishlist_rank": None}
+
     sess = session or requests.Session()
+    if FOLLOWER_FETCH_DELAY > 0:
+        time.sleep(FOLLOWER_FETCH_DELAY)
     
     # 获取关注者数
     followers = fetch_follower_count(appid, sess)
@@ -272,9 +392,13 @@ def fetch_wishlist_data(appid: int, details: Dict = None, session: requests.Sess
     
     # 获取SteamDB排名（可选，因为只有热门游戏才有排名）
     wishlist_rank = None
-    if followers and followers > 100:  # 只有一定关注者的游戏才尝试获取排名
-        # 添加延时避免请求过于频繁
-        time.sleep(0.5)
+    if (
+        WISHLIST_RANK_FETCH_ENABLED
+        and followers
+        and followers >= WISHLIST_RANK_MIN_FOLLOWERS
+    ):
+        if WISHLIST_RANK_DELAY > 0:
+            time.sleep(WISHLIST_RANK_DELAY)
         wishlist_rank = fetch_wishlist_rank(appid, sess)
     
     return {
