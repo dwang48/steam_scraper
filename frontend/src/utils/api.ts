@@ -139,10 +139,11 @@ const realApi = {
       body: JSON.stringify(payload)
     }),
   exportLikesCsv: async (params?: { action?: SwipeActionType; ids?: string | number[]; date?: string }) => {
-    const idsParam =
-      params?.ids && Array.isArray(params.ids)
-        ? params.ids.join(",")
-        : params?.ids ?? undefined;
+    const idsParam = Array.isArray(params?.ids)
+      ? params?.ids.join(",")
+      : params?.ids
+      ? String(params.ids)
+      : undefined;
     const query = buildQuery({
       action: params?.action ?? "like",
       ids: idsParam,
