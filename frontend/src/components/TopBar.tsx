@@ -1,14 +1,17 @@
 import { format } from "date-fns";
 import { motion } from "framer-motion";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import type { CurrentUser } from "../types";
 import { getAdminUrl } from "../utils/admin";
 
 interface TopBarProps {
   date: Date;
+  dateValue: string;
   total: number;
   onChangeDate: (direction: "prev" | "next") => void;
+  onSelectDate: (isoDate: string) => void;
   disableNext?: boolean;
+  maxDate?: string;
   user?: CurrentUser | null;
   loadingUser?: boolean;
   onSignIn?: () => void;
@@ -17,6 +20,8 @@ interface TopBarProps {
   showingHandled?: boolean;
   handledCount?: number;
   onToggleShowHandled?: () => void;
+  autoOpenStorefront?: boolean;
+  onToggleAutoOpen?: () => void;
 }
 
 function getDisplayName(user?: CurrentUser | null) {
@@ -40,9 +45,12 @@ function getInitials(source: string) {
 
 export function TopBar({
   date,
+  dateValue,
   total,
   onChangeDate,
+  onSelectDate,
   disableNext,
+  maxDate,
   user,
   loadingUser,
   onSignIn,
@@ -50,8 +58,11 @@ export function TopBar({
   signOutInFlight,
   showingHandled,
   handledCount = 0,
-  onToggleShowHandled
+  onToggleShowHandled,
+  autoOpenStorefront,
+  onToggleAutoOpen
 }: TopBarProps) {
+  const dateInputRef = useRef<HTMLInputElement | null>(null);
   const displayName = loadingUser ? "Loading…" : getDisplayName(user);
   const subtitle = loadingUser
     ? "Checking session…"
@@ -128,19 +139,34 @@ export function TopBar({
           >
             {format(date, "EEEE, MMM d")}
           </motion.h1>
-          <div className="mt-0.5 sm:mt-1 flex flex-col gap-1">
+          <div className="mt-0.5 sm:mt-1 flex flex-col gap-2">
             <p className="text-xs sm:text-sm text-mist-subtle/80">
               {total} experiences awaiting{processedText ? ` • ${processedText}` : ""}
             </p>
-            {onToggleShowHandled && (
-              <button
-                type="button"
-                onClick={onToggleShowHandled}
-                className="self-start rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[0.625rem] text-mist-subtle/85 hover:bg-white/10 hover:text-white transition"
-              >
-                {toggleLabel}
-              </button>
-            )}
+            <div className="flex flex-wrap gap-2">
+              {onToggleShowHandled && (
+                <button
+                  type="button"
+                  onClick={onToggleShowHandled}
+                  className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[0.625rem] text-mist-subtle/85 hover:bg-white/10 hover:text-white transition"
+                >
+                  {toggleLabel}
+                </button>
+              )}
+              {onToggleAutoOpen && (
+                <button
+                  type="button"
+                  onClick={onToggleAutoOpen}
+                  className={`rounded-full px-2 py-1 text-[0.625rem] transition ${
+                    autoOpenStorefront
+                      ? "border border-accent/60 bg-accent/10 text-accent hover:bg-accent/20 hover:text-white"
+                      : "border border-white/10 bg-white/5 text-mist-subtle/85 hover:bg-white/10 hover:text-white"
+                  }`}
+                >
+                  {autoOpenStorefront ? "Auto-open Steam tabs" : "Open Steam tab on swipe"}
+                </button>
+              )}
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-1.5 sm:gap-2">
@@ -159,6 +185,23 @@ export function TopBar({
           >
             ›
           </button>
+          <button
+            type="button"
+            onClick={() => dateInputRef.current?.showPicker?.() || dateInputRef.current?.click()}
+            className="glass-panel px-2.5 py-1.5 sm:px-3 sm:py-2 text-sm text-mist hover:bg-ink-softer/90 transition"
+            aria-label="Jump to date"
+          >
+            📅
+          </button>
+          <input
+            ref={dateInputRef}
+            type="date"
+            className="sr-only"
+            value={dateValue}
+            max={maxDate}
+            onChange={(event) => onSelectDate(event.target.value)}
+            aria-label="Select date"
+          />
         </div>
       </div>
     </header>

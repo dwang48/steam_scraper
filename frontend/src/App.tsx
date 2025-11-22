@@ -16,6 +16,7 @@ import { useCurrentUser } from "./hooks/useCurrentUser";
 import { GameSnapshot, LoginPayload, RegisterPayload, SwipeActionType } from "./types";
 import { api, IS_DEMO_MODE } from "./utils/api";
 import { LikeReasonDialog } from "./components/LikeReasonDialog";
+import { getSteamStoreUrl } from "./utils/steamAssets";
 
 type SwipeOutcome = { success: boolean; advance?: boolean };
 
@@ -39,6 +40,15 @@ export default function App() {
   const [likeDialogTarget, setLikeDialogTarget] = useState<GameSnapshot | null>(null);
   const [isSavingLike, setSavingLike] = useState(false);
   const [showHandled, setShowHandled] = useState(false);
+  const [autoOpenStorefront, setAutoOpenStorefront] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem("auto-open-storefront") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const lastAutoOpenedIdRef = useRef<number | null>(null);
 
   // Parse at midday to avoid timezone drifting the intended date
   const dateObj = useMemo(() => parseISO(activeDate + "T12:00:00"), [activeDate]);
@@ -58,6 +68,7 @@ export default function App() {
   });
 
   const currentSnapshot = snapshots[cursor] ?? null;
+  const isDailyView = activeView === "daily";
 
   const pendingCount = useMemo(() => {
     if (excludeHandled) {
@@ -140,6 +151,18 @@ export default function App() {
       setCursor(0);
     },
     [dateObj, todayDate]
+  );
+
+  const handleSelectDate = useCallback(
+    (nextDateStr: string) => {
+      if (!nextDateStr) return;
+      const parsed = parseISO(nextDateStr + "T12:00:00");
+      if (isAfter(parsed, todayDate)) return;
+      setActiveDate(format(parsed, "yyyy-MM-dd"));
+      setActiveSnapshot(null);
+      setCursor(0);
+    },
+    [todayDate]
   );
 
   const handleSwipe = useCallback(
@@ -238,6 +261,33 @@ export default function App() {
     [currentSnapshot, handleSwipe]
   );
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem("auto-open-storefront", autoOpenStorefront ? "1" : "0");
+    } catch {
+      // Ignore storage errors (e.g., private browsing)
+    }
+  }, [autoOpenStorefront]);
+
+  useEffect(() => {
+    if (!isDailyView) return;
+    if (!autoOpenStorefront) return;
+    if (!currentSnapshot) return;
+    if (lastAutoOpenedIdRef.current === currentSnapshot.id) return;
+    const storeUrl = getSteamStoreUrl(currentSnapshot.game.steam_appid, currentSnapshot.game.steam_url);
+    if (!storeUrl) return;
+    const isDesktop = typeof window !== "undefined" ? window.matchMedia?.("(min-width: 1024px)")?.matches ?? true : false;
+    if (!isDesktop) return;
+    window.open(storeUrl, "_blank", "noopener,noreferrer");
+    lastAutoOpenedIdRef.current = currentSnapshot.id;
+  }, [autoOpenStorefront, currentSnapshot, isDailyView]);
+
+  const handleToggleAutoOpen = useCallback(() => {
+    lastAutoOpenedIdRef.current = null;
+    setAutoOpenStorefront((prev) => !prev);
+  }, []);
+
   const handleRequestLike = useCallback(
     (snapshot: GameSnapshot | null) => {
       if (!snapshot) return;
@@ -316,18 +366,18 @@ export default function App() {
     }
   }, [refreshCurrentUser, showToast]);
 
-  const isDailyView = activeView === "daily";
-
   return (
     <div className="min-h-screen bg-transparent">
       <PrimaryNav activeView={activeView} onChange={setActiveView} />
       <div className="pb-16">
         {isDailyView ? (
-          <div className="mx-auto flex w-full max-w-lg flex-col">
+          <div className="mx-auto flex w-full max-w-screen-2xl flex-col px-3 sm:px-6 lg:px-10">
             <TopBar
               date={dateObj}
+              dateValue={activeDate}
               total={pendingCount}
               onChangeDate={handleChangeDate}
+              onSelectDate={handleSelectDate}
               disableNext={!isAfter(todayDate, dateObj)}
               user={currentUser}
               loadingUser={isUserLoading}
@@ -337,9 +387,12 @@ export default function App() {
               showingHandled={showHandled}
               handledCount={handledCount}
               onToggleShowHandled={currentUser?.is_authenticated ? handleToggleShowHandled : undefined}
+              maxDate={format(todayDate, "yyyy-MM-dd")}
+              autoOpenStorefront={autoOpenStorefront}
+              onToggleAutoOpen={handleToggleAutoOpen}
             />
-            <main className="flex-1 px-3 py-2 sm:px-6 sm:py-6 flex flex-col gap-3 sm:gap-6">
-              <section className="relative flex-1 min-h-[520px] sm:min-h-[600px] md:min-h-[680px]">
+            <main className="flex-1 py-2 sm:py-6 flex flex-col gap-3 sm:gap-6">
+              <section className="relative flex-1 min-h-[520px] sm:min-h-[640px] lg:min-h-[720px] max-w-6xl mx-auto w-full pb-28 lg:pb-32">
                 {isLoading && (
                   <div className="absolute inset-0 flex flex-col items-center justify-center glass-panel">
                     <LoadingSpinner />

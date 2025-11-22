@@ -8,7 +8,8 @@ import type {
   RegisterPayload,
   SwipeActionRecord,
   SwipePayload,
-  SwipeResponse
+  SwipeResponse,
+  SwipeActionType
 } from "../types";
 
 // Determine whether we should use demo mode
@@ -137,6 +138,25 @@ const realApi = {
       method: "POST",
       body: JSON.stringify(payload)
     }),
+  exportLikesCsv: async (params?: { action?: SwipeActionType; ids?: string | number[]; date?: string }) => {
+    const idsParam =
+      params?.ids && Array.isArray(params.ids)
+        ? params.ids.join(",")
+        : params?.ids ?? undefined;
+    const query = buildQuery({
+      action: params?.action ?? "like",
+      ids: idsParam,
+      date: params?.date
+    });
+    const response = await fetch(`${API_BASE}/swipes/export/${query}`, {
+      credentials: "include"
+    });
+    if (!response.ok) {
+      const message = await response.text().catch(() => "");
+      throw new Error(message || `Export failed (${response.status})`);
+    }
+    return response.blob();
+  },
   ping: () => request("/health/"),
   currentUser: () => request<CurrentUser>("/auth/me/"),
   dailySummary: (params?: { date?: string; window?: "day" | "week" | "month" }) => {

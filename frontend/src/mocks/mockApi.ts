@@ -182,6 +182,49 @@ export async function mockListSwipes(): Promise<PaginatedResponse<SwipeActionRec
   };
 }
 
+export async function mockExportLikesCsv(params?: { ids?: string | number[]; date?: string }): Promise<Blob> {
+  await delay(160);
+  let filtered = [...mockSwipeHistory];
+  if (params?.ids) {
+    const ids =
+      Array.isArray(params.ids) ? params.ids.map((v) => Number(v)) : String(params.ids).split(",").map((v) => Number(v.trim()));
+    filtered = filtered.filter((like) => ids.includes(like.id));
+  }
+  if (params?.date) {
+    const target = params.date;
+    filtered = filtered.filter((like) => like.created_at.slice(0, 10) === target);
+  }
+  const header = "type,name,steam_appid,developers,publishers,website,categories,genres,steam_url,detection_stage,api_response_type,potential_duplicate,release_date,description,supported_languages,followers,wishlists_est,wishlist_rank,discovery_date\n";
+  const rows = filtered
+    .map((like) => {
+      const game = like.game_detail;
+      const parts = [
+        "game",
+        game?.name ?? `Game ${like.game}`,
+        String(game?.steam_appid ?? like.game),
+        game?.developers ?? "",
+        game?.publishers ?? "",
+        game?.website ?? "",
+        game?.categories ?? "",
+        game?.genres ?? "",
+        game?.steam_url ?? "",
+        game?.latest_detection_stage ?? "",
+        game?.latest_api_response_type ?? "",
+        "False",
+        game?.latest_release_date ?? "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+      ];
+      return parts.map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(",");
+    })
+    .join("\n");
+  return new Blob([header + rows], { type: "text/csv" });
+}
+
 export async function mockDailySummary(params?: { date?: string; window?: "day" | "week" | "month" }): Promise<DailySummary> {
   await delay(220);
   const targetDate = params?.date ?? new Date().toISOString().slice(0, 10);
@@ -294,6 +337,7 @@ export const mockApi = {
   listSnapshots: mockListSnapshots,
   listSwipes: mockListSwipes,
   createSwipe: mockCreateSwipe,
+  exportLikesCsv: mockExportLikesCsv,
   ping: mockPing,
   currentUser: mockCurrentUser,
   dailySummary: mockDailySummary,

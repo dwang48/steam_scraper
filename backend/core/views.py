@@ -4,6 +4,7 @@ API views powered by Django REST Framework.
 
 from __future__ import annotations
 
+import csv
 import io
 import logging
 from datetime import datetime, timedelta, date
@@ -28,6 +29,27 @@ from . import models, serializers, authentication as core_auth
 User = get_user_model()
 logger = logging.getLogger(__name__)
 DATE_FMT = "%Y-%m-%d"
+DAILY_CSV_FIELDS = [
+    "type",
+    "name",
+    "steam_appid",
+    "developers",
+    "publishers",
+    "website",
+    "categories",
+    "genres",
+    "steam_url",
+    "detection_stage",
+    "api_response_type",
+    "potential_duplicate",
+    "release_date",
+    "description",
+    "supported_languages",
+    "followers",
+    "wishlists_est",
+    "wishlist_rank",
+    "discovery_date",
+]
 
 
 def _parse_iso_date(value: Optional[str], default):
@@ -445,6 +467,74 @@ class SwipeActionViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewset
             swipe = serializer.save(user=self.request.user)
         if swipe.action == models.SwipeAction.ACTION_WATCHLIST:
             _ensure_watchlist_entry(swipe)
+
+    @action(detail=False, methods=["get"], url_path="export")
+    def export_csv(self, request):
+        """Export the user's swipe history (defaulting to likes) in the daily CSV format."""
+
+        action_filter = request.query_params.get("action") or models.SwipeAction.ACTION_LIKE
+        ids_param = request.query_params.get("ids")
+        queryset = self.filter_queryset(self.get_queryset())
+        if action_filter:
+            queryset = queryset.filter(action=action_filter)
+        if ids_param:
+            try:
+                id_list = [int(item) for item in ids_param.split(",") if item.strip()]
+                if id_list:
+                    queryset = queryset.filter(id__in=id_list)
+            except ValueError:
+                pass
+
+        swipes = list(queryset.select_related("game", "batch"))
+        game_ids = [swipe.game_id for swipe in swipes]
+
+        snapshot_map: Dict[int, models.GameSnapshot] = {}
+        if game_ids:
+            snapshots = (
+                models.GameSnapshot.objects.filter(game_id__in=game_ids)
+                .order_by("game_id", "-ingested_for_date", "-created_at", "-id")
+            )
+            for snapshot in snapshots:
+                if snapshot.game_id in snapshot_map:
+                    continue
+                snapshot_map[snapshot.game_id] = snapshot
+
+        output = io.StringIO()
+        output.write("\ufeff")
+        writer = csv.DictWriter(output, fieldnames=DAILY_CSV_FIELDS)
+        writer.writeheader()
+
+        for swipe in swipes:
+            game = swipe.game
+            snapshot = snapshot_map.get(swipe.game_id)
+            raw_payload = snapshot.raw_payload if snapshot else {}
+            row = {
+                "type": (raw_payload.get("type") if isinstance(raw_payload, dict) else None) or "game",
+                "name": game.name,
+                "steam_appid": game.steam_appid,
+                "developers": game.developers,
+                "publishers": game.publishers,
+                "website": game.website,
+                "categories": snapshot.source_categories if snapshot else game.categories,
+                "genres": snapshot.source_genres if snapshot else game.genres,
+                "steam_url": game.steam_url,
+                "detection_stage": snapshot.detection_stage if snapshot else game.latest_detection_stage,
+                "api_response_type": snapshot.api_response_type if snapshot else game.latest_api_response_type,
+                "potential_duplicate": snapshot.potential_duplicate if snapshot else "",
+                "release_date": snapshot.release_date_raw or game.latest_release_date,
+                "description": snapshot.description or "",
+                "supported_languages": snapshot.supported_languages if snapshot else "",
+                "followers": snapshot.followers,
+                "wishlists_est": snapshot.wishlists_est,
+                "wishlist_rank": snapshot.wishlist_rank,
+                "discovery_date": snapshot.discovery_date.isoformat() if snapshot and snapshot.discovery_date else "",
+            }
+            writer.writerow({key: "" if value is None else value for key, value in row.items()})
+
+        filename = f"swipes-{action_filter or 'all'}-{timezone.now().date().isoformat()}.csv"
+        response = HttpResponse(output.getvalue(), content_type="text/csv")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
 
 
 class WatchlistEntryViewSet(viewsets.ReadOnlyModelViewSet):

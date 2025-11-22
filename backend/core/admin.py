@@ -36,10 +36,17 @@ class WatchlistEntryAdmin(admin.ModelAdmin):
 
 @admin.register(models.SwipeAction)
 class SwipeActionAdmin(admin.ModelAdmin):
-    list_display = ("user", "game", "action", "created_at")
+    list_display = ("user", "game", "action", "note_preview", "created_at")
     list_filter = ("action", "created_at")
     search_fields = ("game__name", "game__steam_appid", "user__username")
     ordering = ("-created_at",)
+
+    @admin.display(description="Like reason")
+    def note_preview(self, obj: models.SwipeAction):
+        note = (obj.note or "").strip()
+        if not note:
+            return "—"
+        return (note[:80] + "…") if len(note) > 80 else note
 
 
 @admin.register(models.DailyGameEngagement)
