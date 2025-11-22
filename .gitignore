@@ -9,6 +9,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+backend/db.sqlite3
 
 
 # 爬虫日志
