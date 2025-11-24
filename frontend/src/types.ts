@@ -136,6 +136,11 @@ export interface RegisterPayload {
   last_name?: string;
 }
 
+export interface RegisterResponse extends CurrentUser {
+  pending_approval?: boolean;
+  detail?: string;
+}
+
 export interface LeaderboardMemberStat {
   user: UserSummary;
   handled_games: number;

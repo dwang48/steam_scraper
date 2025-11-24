@@ -12,12 +12,11 @@ interface CardStackProps {
     snapshot: GameSnapshot,
     action: SwipeActionType
   ) => Promise<boolean | { success: boolean; advance?: boolean }> | boolean | { success: boolean; advance?: boolean };
-  onOpenDetails: (snapshot: GameSnapshot) => void;
 }
 
 const SWIPE_THRESHOLD = 120;
 
-export function CardStack({ snapshots, activeIndex, onActiveIndexChange, onSwipe, onOpenDetails }: CardStackProps) {
+export function CardStack({ snapshots, activeIndex, onActiveIndexChange, onSwipe }: CardStackProps) {
   const [direction, setDirection] = useState<"left" | "right" | null>(null);
   const [isProcessing, setProcessing] = useState(false);
 
@@ -108,7 +107,6 @@ export function CardStack({ snapshots, activeIndex, onActiveIndexChange, onSwipe
                 snapshot={snapshot}
                 active={isActive}
                 offset={index}
-                onShowDetails={() => onOpenDetails(snapshot)}
               />
               {isActive && (
                 <div className="absolute inset-x-0 -bottom-20 flex items-center justify-between text-xs uppercase tracking-[0.3em] text-mist-subtle/60 pointer-events-none">

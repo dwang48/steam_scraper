@@ -4,7 +4,6 @@ interface ActionBarProps {
   snapshot: GameSnapshot | null;
   onLike: () => void;
   onSkip: () => void;
-  onDetails: () => void;
   disabled?: boolean;
 }
 
@@ -12,7 +11,6 @@ export function ActionBar({
   snapshot,
   onLike,
   onSkip,
-  onDetails,
   disabled
 }: ActionBarProps) {
   return (
@@ -25,13 +23,6 @@ export function ActionBar({
           aria-label="Skip"
         >
           –
-        </button>
-        <button
-          onClick={onDetails}
-          disabled={!snapshot}
-          className="flex-1 text-sm text-mist-subtle/90 hover:text-white transition disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          Details
         </button>
         <button
           onClick={onLike}

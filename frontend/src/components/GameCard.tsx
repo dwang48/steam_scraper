@@ -9,10 +9,9 @@ interface GameCardProps {
   snapshot: GameSnapshot;
   active?: boolean;
   offset?: number;
-  onShowDetails?: () => void;
 }
 
-export function GameCard({ snapshot, active, offset = 0, onShowDetails }: GameCardProps) {
+export function GameCard({ snapshot, active, offset = 0 }: GameCardProps) {
   const { game } = snapshot;
   const isHandled = snapshot.handled ?? false;
 
@@ -182,9 +181,6 @@ export function GameCard({ snapshot, active, offset = 0, onShowDetails }: GameCa
           <p className="text-xs sm:text-sm text-mist-subtle/80">
             Followers {snapshot.followers ?? "—"} · WL est. {snapshot.wishlists_est ?? "—"}
           </p>
-          <p className="text-xs sm:text-sm text-mist-subtle/90 leading-relaxed md:line-clamp-none md:pr-2">
-            {snapshot.description || "No description yet."}
-          </p>
           {tags.length > 0 && (
             <div className="flex flex-wrap gap-1.5 sm:gap-2">
               {tags.map((tag) => (
@@ -208,30 +204,94 @@ export function GameCard({ snapshot, active, offset = 0, onShowDetails }: GameCa
         </div>
       </div>
       <div className="flex items-center justify-between mt-auto pt-2 sm:pt-4">
-        <div className="text-[0.625rem] sm:text-xs text-mist-subtle/70">
-          {snapshot.release_date_raw || "TBA"}
+        <div className="text-[0.625rem] sm:text-xs text-mist-subtle/70">{snapshot.release_date_raw || "TBA"}</div>
+      </div>
+
+      <div className="mt-4 space-y-4">
+        <div>
+          <h3 className="uppercase text-[0.65rem] tracking-[0.35em] text-mist-subtle/60 mb-2">Overview</h3>
+          <p className="text-sm text-mist/90 leading-relaxed">{snapshot.description || "No description provided yet."}</p>
         </div>
-        <button
-          type="button"
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onShowDetails?.();
-          }}
-          onPointerDown={(event) => {
-            event.stopPropagation();
-          }}
-          onMouseDown={(event) => {
-            event.stopPropagation();
-          }}
-          onTouchStart={(event) => {
-            event.stopPropagation();
-          }}
-          className="text-xs sm:text-sm text-accent font-medium hover:text-white transition cursor-pointer z-10 relative"
-          style={{ touchAction: "none" }}
-        >
-          More
-        </button>
+
+        {game.screenshot_urls && game.screenshot_urls.length > 0 && (
+          <div>
+            <h3 className="uppercase text-[0.65rem] tracking-[0.35em] text-mist-subtle/60 mb-2">Screenshots</h3>
+            <div className="flex gap-3 overflow-x-auto pb-2">
+              {game.screenshot_urls.slice(0, 6).map((url) => (
+                <img
+                  key={url}
+                  src={url}
+                  alt={`${game.name} screenshot`}
+                  className="h-28 w-auto rounded-2xl border border-white/10 object-cover sm:h-32"
+                  loading="lazy"
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {game.trailer_videos && game.trailer_videos.length > 0 && (
+          <div>
+            <h3 className="uppercase text-[0.65rem] tracking-[0.35em] text-mist-subtle/60 mb-2">Videos</h3>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {game.trailer_videos.slice(0, 2).map((clip, index) => {
+                const key = clip?.id ?? clip?.mp4 ?? clip?.webm ?? `${index}`;
+                return (
+                  <div key={key} className="space-y-2">
+                    <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/40">
+                      <video
+                        controls
+                        poster={clip?.thumbnail ?? undefined}
+                        className="w-full h-auto max-h-64"
+                        preload="metadata"
+                      >
+                        {clip?.mp4 && <source src={clip.mp4} type="video/mp4" />}
+                        {clip?.webm && <source src={clip.webm} type="video/webm" />}
+                        Your browser does not support the video tag.
+                      </video>
+                    </div>
+                    {clip?.name && (
+                      <p className="text-xs uppercase tracking-[0.3em] text-mist-subtle/70">{clip.name}</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-3 flex-wrap">
+          {steamStoreUrl && (
+            <a
+              href={steamStoreUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 min-w-[180px] glass-panel text-center text-sm py-2.5 hover:bg-ink-softer/80 transition cursor-pointer"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                window.open(steamStoreUrl, "_blank", "noopener,noreferrer");
+              }}
+            >
+              View on Steam
+            </a>
+          )}
+          {game.website && (
+            <a
+              href={game.website}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 min-w-[180px] glass-panel text-center text-sm py-2.5 hover:bg-ink-softer/80 transition cursor-pointer"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                window.open(game.website ?? "", "_blank", "noopener,noreferrer");
+              }}
+            >
+              Official Site
+            </a>
+          )}
+        </div>
       </div>
     </motion.article>
   );

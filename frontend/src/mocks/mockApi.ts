@@ -7,6 +7,7 @@ import {
   CurrentUser,
   LoginPayload,
   RegisterPayload,
+  RegisterResponse,
   SwipeActionRecord,
   DailySummary,
   UserSummary,
@@ -154,16 +155,19 @@ export async function mockLogin(_payload: LoginPayload): Promise<CurrentUser> {
   return demoUser;
 }
 
-export async function mockRegister(payload: RegisterPayload): Promise<CurrentUser> {
+export async function mockRegister(payload: RegisterPayload): Promise<RegisterResponse> {
   await delay(300);
-  mockSignedIn = true;
+  mockSignedIn = false;
   return {
-    ...demoUser,
+    is_authenticated: false,
+    pending_approval: true,
+    detail: "Registration received. An admin must approve your account before you can sign in.",
+    id: Math.floor(Math.random() * 10000),
     username: payload.username,
     email: payload.email,
-    first_name: payload.first_name || demoUser.first_name,
-    last_name: payload.last_name || demoUser.last_name
-  };
+    first_name: payload.first_name || "",
+    last_name: payload.last_name || ""
+  } as RegisterResponse;
 }
 
 export async function mockLogout(): Promise<CurrentUser> {

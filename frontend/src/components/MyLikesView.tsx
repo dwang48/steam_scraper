@@ -64,7 +64,14 @@ export function MyLikesView({ isAuthenticated, onRequireSignIn }: MyLikesViewPro
     );
   }
 
-  const likes = data?.results ?? [];
+  const likes = useMemo(() => {
+    const items = data?.results ?? [];
+    return [...items].sort((a, b) => {
+      const timeA = Date.parse(a.created_at);
+      const timeB = Date.parse(b.created_at);
+      return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+    });
+  }, [data?.results]);
   const allSelected = likes.length > 0 && selectedIds.size === likes.length;
   const hasSelection = selectedIds.size > 0;
 
@@ -91,7 +98,7 @@ export function MyLikesView({ isAuthenticated, onRequireSignIn }: MyLikesViewPro
   useEffect(() => {
     // Clear selection when data set changes (e.g., filter date change)
     setSelectedIds(new Set());
-  }, [data]);
+  }, [likes]);
 
   const handleRemove = async (like: SwipeActionRecord) => {
     if (saving) return;

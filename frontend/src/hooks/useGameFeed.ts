@@ -10,6 +10,7 @@ interface UseGameFeedParams {
   category?: string;
   genre?: string;
   excludeHandled?: boolean;
+  enabled?: boolean;
 }
 
 export function useGameFeed(params: UseGameFeedParams) {
@@ -23,15 +24,17 @@ export function useGameFeed(params: UseGameFeedParams) {
     return `?${searchParams.toString()}`;
   }, [params.date, params.minFollowers, params.tag, params.category, params.genre, params.excludeHandled]);
 
+  const shouldFetch = params.enabled ?? true;
   const { data, error, isLoading, mutate } = useSWR<PaginatedResponse<GameSnapshot>>(
-    `/games/${query}`,
-    (path: string) => api.listSnapshots(path) as Promise<PaginatedResponse<GameSnapshot>>
+    shouldFetch ? `/games/${query}` : null,
+    (path: string) => api.listSnapshots(path) as Promise<PaginatedResponse<GameSnapshot>>,
+    { revalidateOnFocus: false }
   );
 
   return {
     snapshots: data?.results ?? [],
-    isLoading,
-    error,
+    isLoading: shouldFetch ? isLoading : false,
+    error: shouldFetch ? error : null,
     mutate,
     total: data?.count ?? 0
   };

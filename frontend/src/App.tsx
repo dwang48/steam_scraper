@@ -3,7 +3,6 @@ import { format, subDays, addDays, isAfter, parseISO } from "date-fns";
 import { AnimatePresence, motion } from "framer-motion";
 import { TopBar } from "./components/TopBar";
 import { CardStack } from "./components/CardStack";
-import { DetailSheet } from "./components/DetailSheet";
 import { ActionBar } from "./components/ActionBar";
 import { AuthDialog } from "./components/AuthDialog";
 import { PrimaryNav, AppView } from "./components/PrimaryNav";
@@ -29,7 +28,6 @@ function initialActiveDate() {
 
 export default function App() {
   const [activeDate, setActiveDate] = useState(initialActiveDate);
-  const [activeSnapshot, setActiveSnapshot] = useState<GameSnapshot | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: "positive" | "neutral" } | null>(null);
   const [cursor, setCursor] = useState(0);
   const toastTimer = useRef<number | null>(null);
@@ -59,12 +57,14 @@ export default function App() {
     isLoading: isUserLoading,
     refresh: refreshCurrentUser
   } = useCurrentUser();
+  const isAuthenticated = Boolean(currentUser?.is_authenticated);
 
-  const excludeHandled = currentUser?.is_authenticated ? !showHandled : false;
+  const excludeHandled = isAuthenticated ? !showHandled : false;
 
   const { snapshots, isLoading, error, mutate, total } = useGameFeed({
     date: activeDate,
-    excludeHandled
+    excludeHandled,
+    enabled: isAuthenticated
   });
 
   const currentSnapshot = snapshots[cursor] ?? null;
@@ -86,7 +86,6 @@ export default function App() {
 
   const handleToggleShowHandled = useCallback(() => {
     setShowHandled((prev) => !prev);
-    setActiveSnapshot(null);
     setCursor(0);
   }, []);
 
@@ -104,6 +103,12 @@ export default function App() {
     setCursor(0);
   }, [activeDate]);
 
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setActiveView("daily");
+    }
+  }, [isAuthenticated]);
+
   const clearToastTimer = useCallback(() => {
     if (toastTimer.current) {
       window.clearTimeout(toastTimer.current);
@@ -114,7 +119,6 @@ export default function App() {
   useEffect(() => clearToastTimer, [clearToastTimer]);
   useEffect(() => {
     if (activeView !== "daily") {
-      setActiveSnapshot(null);
       setToast(null);
     }
   }, [activeView]);
@@ -147,7 +151,6 @@ export default function App() {
       const nextDate = direction === "prev" ? subDays(dateObj, 1) : addDays(dateObj, 1);
       if (direction === "next" && isAfter(nextDate, todayDate)) return;
       setActiveDate(format(nextDate, "yyyy-MM-dd"));
-      setActiveSnapshot(null);
       setCursor(0);
     },
     [dateObj, todayDate]
@@ -159,10 +162,20 @@ export default function App() {
       const parsed = parseISO(nextDateStr + "T12:00:00");
       if (isAfter(parsed, todayDate)) return;
       setActiveDate(format(parsed, "yyyy-MM-dd"));
-      setActiveSnapshot(null);
       setCursor(0);
     },
     [todayDate]
+  );
+
+  const handleChangeView = useCallback(
+    (view: AppView) => {
+      if (!isAuthenticated) {
+        setAuthOpen(true);
+        return;
+      }
+      setActiveView(view);
+    },
+    [isAuthenticated]
   );
 
   const handleSwipe = useCallback(
@@ -235,7 +248,6 @@ export default function App() {
         showToast(message, tone, duration);
 
         if (advancePreference || excludeHandled) {
-          setActiveSnapshot((current) => (current?.id === snapshot.id ? null : current));
         }
 
         return { success: true, advance: excludeHandled ? false : advancePreference };
@@ -339,9 +351,15 @@ export default function App() {
   const handleRegister = useCallback(
     async (payload: RegisterPayload) => {
       try {
-        await api.register(payload);
+        const response = await api.register(payload);
         await refreshCurrentUser();
-        showToast("Welcome aboard!", "positive");
+        const pending = (response as any)?.pending_approval;
+        const detail = (response as any)?.detail;
+        showToast(
+          pending ? detail || "Registration submitted for admin approval." : "Welcome aboard!",
+          pending ? "neutral" : "positive",
+          pending ? 3400 : 2000
+        );
       } catch (error) {
         if (error instanceof Error) {
           throw error;
@@ -366,11 +384,40 @@ export default function App() {
     }
   }, [refreshCurrentUser, showToast]);
 
+  const showAuthGate = !isUserLoading && !isAuthenticated;
+  const showLoadingGate = isUserLoading && !isAuthenticated;
+
   return (
     <div className="min-h-screen bg-transparent">
-      <PrimaryNav activeView={activeView} onChange={setActiveView} />
+      <PrimaryNav activeView={activeView} onChange={handleChangeView} />
       <div className="pb-16">
-        {isDailyView ? (
+        {showLoadingGate ? (
+          <div className="mx-auto flex h-[60vh] max-w-4xl items-center justify-center px-4">
+            <div className="glass-panel flex flex-col items-center gap-4 px-6 py-8 rounded-3xl">
+              <LoadingSpinner />
+              <p className="text-sm text-mist-subtle/75">Checking your session…</p>
+            </div>
+          </div>
+        ) : showAuthGate ? (
+          <div className="mx-auto max-w-4xl px-4 py-12 sm:py-16">
+            <div className="glass-panel px-6 py-10 text-center rounded-3xl border border-white/5">
+              <h1 className="text-2xl font-semibold text-mist">Sign in to continue</h1>
+              <p className="mt-3 text-sm text-mist-subtle/80">
+                The curated feed is private. Sign in to browse and record your picks.
+              </p>
+              <div className="mt-6 flex flex-col items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleRequireSignIn}
+                  className="rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition hover:bg-white hover:text-ink"
+                >
+                  Open sign-in
+                </button>
+                <p className="text-xs text-mist-subtle/70">New registrations need admin approval.</p>
+              </div>
+            </div>
+          </div>
+        ) : isDailyView ? (
           <div className="mx-auto flex w-full max-w-screen-2xl flex-col px-3 sm:px-6 lg:px-10">
             <TopBar
               date={dateObj}
@@ -386,12 +433,12 @@ export default function App() {
               signOutInFlight={signOutPending}
               showingHandled={showHandled}
               handledCount={handledCount}
-              onToggleShowHandled={currentUser?.is_authenticated ? handleToggleShowHandled : undefined}
+              onToggleShowHandled={isAuthenticated ? handleToggleShowHandled : undefined}
               maxDate={format(todayDate, "yyyy-MM-dd")}
               autoOpenStorefront={autoOpenStorefront}
               onToggleAutoOpen={handleToggleAutoOpen}
             />
-            <main className="flex-1 py-2 sm:py-6 flex flex-col gap-3 sm:gap-6">
+            <main className="flex-1 py-2 sm:py-6 flex flex-col gap-6">
               <section className="relative flex-1 min-h-[520px] sm:min-h-[640px] lg:min-h-[720px] max-w-6xl mx-auto w-full pb-28 lg:pb-32">
                 {isLoading && (
                   <div className="absolute inset-0 flex flex-col items-center justify-center glass-panel">
@@ -417,55 +464,27 @@ export default function App() {
                       activeIndex={cursor}
                       onActiveIndexChange={(index) => setCursor(index)}
                       onSwipe={handleSwipe}
-                      onOpenDetails={(snapshot) => setActiveSnapshot(snapshot)}
                     />
                   </div>
                 )}
               </section>
             </main>
 
-            {!activeSnapshot && (
-              <div className="sticky bottom-0 z-30 pt-2 bg-gradient-to-t from-ink/95 via-ink/60 to-transparent">
-                <ActionBar
-                  snapshot={currentSnapshot}
-                  onLike={() => handleRequestLike(currentSnapshot)}
-                  onSkip={() => handleActionBarSwipe("skip")}
-                  onDetails={() => setActiveSnapshot(currentSnapshot)}
-                  disabled={isSubmitting}
-                />
-              </div>
-            )}
-
-            <DetailSheet snapshot={activeSnapshot} open={!!activeSnapshot} onOpenChange={(open) => !open && setActiveSnapshot(null)} />
-
-            <AnimatePresence>
-              {toast && (
-                <motion.div
-                  className="fixed bottom-24 left-1/2 -translate-x-1/2 glass-panel px-4 py-3 text-sm text-mist-subtle/90"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 20 }}
-                >
-                  {toast.message}
-                </motion.div>
-              )}
-            </AnimatePresence>
+            <div className="sticky bottom-0 z-30 pt-2 bg-gradient-to-t from-ink/95 via-ink/60 to-transparent">
+              <ActionBar
+                snapshot={currentSnapshot}
+                onLike={() => handleRequestLike(currentSnapshot)}
+                onSkip={() => handleActionBarSwipe("skip")}
+                disabled={isSubmitting}
+              />
+            </div>
           </div>
         ) : activeView === "team" ? (
-          <TeamLikesView
-            isAuthenticated={Boolean(currentUser?.is_authenticated)}
-            onRequireSignIn={handleRequireSignIn}
-          />
+          <TeamLikesView isAuthenticated={isAuthenticated} onRequireSignIn={handleRequireSignIn} />
         ) : activeView === "leaderboard" ? (
-          <LeaderboardView
-            isAuthenticated={Boolean(currentUser?.is_authenticated)}
-            onRequireSignIn={handleRequireSignIn}
-          />
+          <LeaderboardView isAuthenticated={isAuthenticated} onRequireSignIn={handleRequireSignIn} />
         ) : (
-          <MyLikesView
-            isAuthenticated={Boolean(currentUser?.is_authenticated)}
-            onRequireSignIn={handleRequireSignIn}
-          />
+          <MyLikesView isAuthenticated={isAuthenticated} onRequireSignIn={handleRequireSignIn} />
         )}
       </div>
 
@@ -491,6 +510,18 @@ export default function App() {
         onSkip={() => handleLikeSubmit("")}
         submitting={isSavingLike}
       />
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 glass-panel px-4 py-3 text-sm text-mist-subtle/90"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+          >
+            {toast.message}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

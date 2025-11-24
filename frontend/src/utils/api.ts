@@ -6,6 +6,7 @@ import type {
   LoginPayload,
   PaginatedResponse,
   RegisterPayload,
+  RegisterResponse,
   SwipeActionRecord,
   SwipePayload,
   SwipeResponse,
@@ -174,7 +175,7 @@ const realApi = {
       body: JSON.stringify(payload)
     }),
   register: (payload: RegisterPayload) =>
-    request<CurrentUser>("/auth/", {
+    request<RegisterResponse>("/auth/", {
       method: "POST",
       body: JSON.stringify(payload)
     }),

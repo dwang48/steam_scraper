@@ -19,7 +19,7 @@ from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.http import HttpResponse
 from django.middleware.csrf import get_token
 from django.utils import timezone
-from django.db.models import Exists, Max, OuterRef, Subquery
+from django.db.models import Exists, Max, OuterRef, Subquery, Q
 from rest_framework import authentication, mixins, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -50,6 +50,31 @@ DAILY_CSV_FIELDS = [
     "wishlist_rank",
     "discovery_date",
 ]
+
+NSFW_KEYWORDS = ["adult", "sexual", "sex", "porn", "hentai", "xxx", "nudity", "erotic", "nsfw"]
+NSFW_SNAPSHOT_FIELDS = [
+    "source_tags",
+    "source_genres",
+    "source_categories",
+    "description",
+    "game__tags",
+    "game__genres",
+    "game__categories",
+    "game__name",
+]
+NSFW_GAME_FIELDS = ["game__tags", "game__genres", "game__categories", "game__name"]
+
+
+def _build_nsfw_filter(fields):
+    condition = Q()
+    for field in fields:
+        for keyword in NSFW_KEYWORDS:
+            condition |= Q(**{f"{field}__icontains": keyword})
+    return condition
+
+
+NSFW_SNAPSHOT_FILTER = _build_nsfw_filter(NSFW_SNAPSHOT_FIELDS)
+NSFW_GAME_FILTER = _build_nsfw_filter(NSFW_GAME_FIELDS)
 
 
 def _parse_iso_date(value: Optional[str], default):
@@ -114,6 +139,7 @@ def _build_daily_summary(target_date, start_date: Optional[date] = None, end_dat
 
     swipes = (
         models.SwipeAction.objects.filter(created_at__date__range=(start, finish), user__isnull=False)
+        .exclude(NSFW_GAME_FILTER)
         .select_related("game", "user")
         .order_by("game__name", "created_at")
     )
@@ -301,10 +327,15 @@ class AuthViewSet(viewsets.ViewSet):
         serializer = serializers.RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        login(request, user)
         data = serializers.UserSerializer(user).data
-        data.update({"is_authenticated": True})
-        return Response(data, status=status.HTTP_201_CREATED)
+        data.update(
+            {
+                "is_authenticated": False,
+                "pending_approval": True,
+                "detail": "Registration received. An admin must approve your account before you can sign in.",
+            }
+        )
+        return Response(data, status=status.HTTP_202_ACCEPTED)
 
     @action(detail=False, methods=["post"], url_path="login")
     def login_action(self, request):
@@ -323,7 +354,27 @@ class AuthViewSet(viewsets.ViewSet):
             if candidate:
                 user = authenticate(request, username=candidate.username, password=password)
         if not user:
+            inactive_candidate = None
+            try:
+                inactive_candidate = User.objects.get(username__iexact=credential)
+            except User.DoesNotExist:
+                if "@" in credential:
+                    try:
+                        inactive_candidate = User.objects.get(email__iexact=credential)
+                    except User.DoesNotExist:
+                        inactive_candidate = None
+            if inactive_candidate and not inactive_candidate.is_active:
+                return Response(
+                    {"detail": "Your account is awaiting admin approval."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        if not user:
             return Response({"detail": "Invalid credentials."}, status=status.HTTP_400_BAD_REQUEST)
+        if not user.is_active:
+            return Response(
+                {"detail": "Your account is awaiting admin approval."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         login(request, user)
         if remember:
@@ -358,7 +409,7 @@ class GameSnapshotViewSet(viewsets.ReadOnlyModelViewSet):
     """Read-only access to ingested game snapshots."""
 
     serializer_class = serializers.GameSnapshotSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         qs = (
@@ -369,6 +420,7 @@ class GameSnapshotViewSet(viewsets.ReadOnlyModelViewSet):
         today = timezone.now().date()
         target_date = _parse_iso_date(self.request.query_params.get("date"), today)
         qs = qs.filter(ingested_for_date=target_date)
+        qs = qs.exclude(NSFW_SNAPSHOT_FILTER)
 
         min_followers = self.request.query_params.get("min_followers")
         if min_followers:
@@ -424,7 +476,7 @@ class SwipeActionViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewset
             models.SwipeAction.objects.select_related("game", "batch", "user")
             .filter(user=self.request.user)
             .order_by("-created_at")
-        )
+        ).exclude(NSFW_GAME_FILTER)
         action_param = self.request.query_params.get("action")
         if action_param in {
             models.SwipeAction.ACTION_LIKE,
@@ -438,6 +490,7 @@ class SwipeActionViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewset
             if target_date:
                 qs = qs.filter(created_at__date=target_date)
         return qs
+
     def perform_create(self, serializer):
         data = serializer.validated_data
         existing = (
@@ -544,7 +597,7 @@ class WatchlistEntryViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
     def get_queryset(self):
-        qs = models.WatchlistEntry.objects.select_related("game")
+        qs = models.WatchlistEntry.objects.select_related("game").exclude(NSFW_GAME_FILTER)
 
         status_filter = self.request.query_params.get("status")
         if status_filter:
@@ -619,6 +672,7 @@ class ReportViewSet(viewsets.ViewSet):
 
         swipes = (
             models.SwipeAction.objects.filter(created_at__date__range=(start_date, end_date), user__isnull=False)
+            .exclude(NSFW_GAME_FILTER)
             .select_related("user", "game")
             .order_by("user_id", "-created_at")
         )
