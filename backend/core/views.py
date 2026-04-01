@@ -25,6 +25,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from . import models, serializers, authentication as core_auth
+from .nsfw import NSFW_QUERY_TERMS
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -51,7 +52,6 @@ DAILY_CSV_FIELDS = [
     "discovery_date",
 ]
 
-NSFW_KEYWORDS = ["adult", "sexual", "sex", "porn", "hentai", "xxx", "nudity", "erotic", "nsfw"]
 NSFW_SNAPSHOT_FIELDS = [
     "source_tags",
     "source_genres",
@@ -68,7 +68,7 @@ NSFW_GAME_FIELDS = ["game__tags", "game__genres", "game__categories", "game__nam
 def _build_nsfw_filter(fields):
     condition = Q()
     for field in fields:
-        for keyword in NSFW_KEYWORDS:
+        for keyword in NSFW_QUERY_TERMS:
             condition |= Q(**{f"{field}__icontains": keyword})
     return condition
 

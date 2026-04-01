@@ -2,6 +2,7 @@ import os
 import json
 import csv
 import smtplib
+import sys
 import tempfile
 import argparse
 import re
@@ -20,6 +21,12 @@ import html
 import requests
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+BACKEND_DIR = Path(__file__).resolve().parent / "backend"
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from core.nsfw import classify_nsfw_from_details
 
 # Constants
 LEGACY_APPLIST_URLS = [
@@ -912,6 +919,7 @@ def main():
 
     # Step 1: Check existing watchlist apps for changes
     watchlist_promotions = []
+    watchlist_nsfw_filtered = 0
     if args.check_watchlist and watchlist:
         logger.info("Checking %d watchlist apps for changes...", len(watchlist))
         
@@ -927,6 +935,19 @@ def main():
                 
                 # Determine new status
                 if details and details.get("_api_response") == "success" and details.get("name"):
+                    is_nsfw, nsfw_reasons = classify_nsfw_from_details(details)
+                    if is_nsfw:
+                        watchlist_nsfw_filtered += 1
+                        logger.info(
+                            "Filtered NSFW watchlist app %s: %s [%s]",
+                            aid_int,
+                            details.get("name"),
+                            ", ".join(nsfw_reasons),
+                        )
+                        if aid_str in watchlist:
+                            del watchlist[aid_str]
+                        continue
+
                     # App became accessible! Fetch wishlist data too
                     wishlist_data = fetch_wishlist_data(aid_int, details)
                     row = build_row(details, aid_int, wishlist_data)
@@ -961,15 +982,20 @@ def main():
     rows = []
     total_fetched = 0
     already_released_filtered = 0
+    nsfw_filtered_count = 0
     new_to_watchlist = 0
     
     def _task(aid):
         details = fetch_app_details(aid)
-        # 只为有成功响应的应用获取wishlist数据
         wishlist_data = None
+        is_nsfw = False
+        nsfw_reasons: list[str] = []
         if details and details.get("_api_response") == "success" and details.get("name"):
-            wishlist_data = fetch_wishlist_data(aid, details)
-        return aid, details, wishlist_data
+            is_nsfw, nsfw_reasons = classify_nsfw_from_details(details)
+            if not is_nsfw:
+                # 只为有成功响应的安全应用获取 wishlist 数据
+                wishlist_data = fetch_wishlist_data(aid, details)
+        return aid, details, wishlist_data, is_nsfw, nsfw_reasons
 
     early_stage_count = 0
     public_unreleased_count = 0
@@ -980,7 +1006,16 @@ def main():
         futures = {exe.submit(_task, aid): aid for aid in new_ids}
         for idx, fut in enumerate(as_completed(futures), start=1):
             total_fetched += 1
-            aid, details, wishlist_data = fut.result()
+            aid, details, wishlist_data, is_nsfw, nsfw_reasons = fut.result()
+            if is_nsfw:
+                nsfw_filtered_count += 1
+                logger.info(
+                    "Filtered NSFW app %s: %s [%s]",
+                    aid,
+                    details.get("name"),
+                    ", ".join(nsfw_reasons),
+                )
+                continue
             row = build_row(details, aid, wishlist_data)
             
             if not row and details:  # Details exist but filtered by date (released games)
@@ -1014,11 +1049,21 @@ def main():
             del watchlist[str(aid_int)]
         known_ids.add(aid_int)
 
-    logger.info("Discovery summary: %d apps processed, %d released (filtered), %d early-stage (watchlisted), %d public unreleased, %d minimal data", 
-            total_fetched, already_released_filtered, early_stage_count, public_unreleased_count, minimal_data_count)
+    logger.info(
+        "Discovery summary: %d apps processed, %d released (filtered), %d NSFW (filtered), %d early-stage (watchlisted), %d public unreleased, %d minimal data",
+        total_fetched,
+        already_released_filtered,
+        nsfw_filtered_count,
+        early_stage_count,
+        public_unreleased_count,
+        minimal_data_count,
+    )
     
     if watchlist_promotions:
         logger.info("Promoted %d apps from watchlist to known apps", len(watchlist_promotions))
+
+    if watchlist_nsfw_filtered:
+        logger.info("Removed %d NSFW apps from watchlist", watchlist_nsfw_filtered)
     
     if new_to_watchlist:
         logger.info("Added %d new apps to watchlist", new_to_watchlist)

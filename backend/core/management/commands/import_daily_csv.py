@@ -15,6 +15,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from core import models
+from core.nsfw import classify_nsfw_from_row
 
 
 class Command(BaseCommand):
@@ -70,11 +71,14 @@ class Command(BaseCommand):
                 source_file=str(csv_path),
                 parameters={"fieldnames": reader.fieldnames},
             )
-            self._ingest_rows(batch, rows)
+            processed_count, skipped_nsfw = self._ingest_rows(batch, rows)
             batch.run_completed_at = timezone.now()
             batch.save(update_fields=["run_completed_at"])
 
-        self.stdout.write(self.style.SUCCESS(f"Ingested {len(rows)} rows into batch {batch.id}"))
+        message = f"Ingested {processed_count} rows into batch {batch.id}"
+        if skipped_nsfw:
+            message += f" (skipped {skipped_nsfw} NSFW rows)"
+        self.stdout.write(self.style.SUCCESS(message))
 
     def _resolve_ingested_date(self, csv_path: Path, override: str | None) -> date:
         if override:
@@ -92,7 +96,9 @@ class Command(BaseCommand):
                 continue
         return date.today()
 
-    def _ingest_rows(self, batch: models.DiscoveryBatch, rows: list[dict[str, Any]]) -> None:
+    def _ingest_rows(self, batch: models.DiscoveryBatch, rows: list[dict[str, Any]]) -> tuple[int, int]:
+        processed_count = 0
+        skipped_nsfw = 0
         for row in rows:
             steam_appid = row.get("steam_appid")
             if not steam_appid:
@@ -102,6 +108,15 @@ class Command(BaseCommand):
                 steam_id = int(steam_appid)
             except (TypeError, ValueError):
                 self.stdout.write(self.style.WARNING(f"Skipping invalid appid: {steam_appid}"))
+                continue
+
+            is_nsfw, reasons = classify_nsfw_from_row(row)
+            if is_nsfw:
+                skipped_nsfw += 1
+                reason_text = ", ".join(reasons)
+                self.stdout.write(
+                    self.style.WARNING(f"Skipping NSFW app {steam_appid}: {row.get('name', '').strip()} [{reason_text}]")
+                )
                 continue
 
             game, _ = models.Game.objects.get_or_create(
@@ -161,6 +176,9 @@ class Command(BaseCommand):
                 ingested_for_date=batch.ingested_for_date,
                 defaults=defaults,
             )
+            processed_count += 1
+
+        return processed_count, skipped_nsfw
 
     def _parse_int(self, value: Any) -> int | None:
         if value in (None, "", "None"):
