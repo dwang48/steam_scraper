@@ -9,6 +9,13 @@ import environ
 # Paths
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+LOCAL_DEV_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
 # Environment
 env = environ.Env(
     DJANGO_DEBUG=(bool, True),
@@ -18,11 +25,13 @@ environ.Env.read_env(env_file=BASE_DIR.parent / ".env")
 # Core settings
 SECRET_KEY = env("DJANGO_SECRET_KEY", default="change-me-in-production")
 DEBUG = env("DJANGO_DEBUG")
-#ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=["*"] if DEBUG else [])
-ALLOWED_HOSTS = ["34.235.149.243", "localhost", "127.0.0.1"]
+ALLOWED_HOSTS = env.list(
+    "DJANGO_ALLOWED_HOSTS",
+    default=["localhost", "127.0.0.1"] if DEBUG else [],
+)
 # Applications
 INSTALLED_APPS = [
-    #"simpleui",
+    # "simpleui",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -115,41 +124,21 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 200,
 }
 
-# CORS配置 - 用于前后端分离部署
-CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[
-    "http://localhost:5173",  # Vite开发服务器默认端口
-    "http://localhost:3000",  # 其他常见前端端口
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:3000",
-    "https://a7729fd21d33.ngrok-free.app",
-    "http://34.235.149.243:5173"
-])
+# Cross-origin settings for local frontend development and explicit deployment envs.
+CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=LOCAL_DEV_ORIGINS)
+CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=LOCAL_DEV_ORIGINS)
 
-CORS_ALLOW_CREDENTIALS = True  # 允许携带cookie（用于session认证）
-
-# CSRF配置 - 信任的来源
-CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:3000",
-    "http://10.251.1.1:5173",
-    "http://169.254.125.8:5173",
-    "https://a7729fd21d33.ngrok-free.app",
-    "http://34.235.149.243:8000"
-])
-# Session配置
-# 如果使用ngrok HTTPS，设置 USE_HTTPS=True
+# Session configuration
 USE_HTTPS = env.bool("USE_HTTPS", default=False)
 
-SESSION_COOKIE_SAMESITE = "None" if USE_HTTPS else "Lax"  # 支持跨域（ngrok等）
-SESSION_COOKIE_HTTPONLY = True  # 防止XSS攻击
-SESSION_COOKIE_SECURE = USE_HTTPS  # HTTPS时启用
-CSRF_COOKIE_SAMESITE = "None" if USE_HTTPS else "Lax"  # 支持跨域
-CSRF_COOKIE_HTTPONLY = False  # 前端需要读取CSRF token
+SESSION_COOKIE_SAMESITE = "None" if USE_HTTPS else "Lax"
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SECURE = USE_HTTPS
+CSRF_COOKIE_SAMESITE = "None" if USE_HTTPS else "Lax"
+CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SECURE = USE_HTTPS
 
-# 允许ngrok等反向代理
 if USE_HTTPS:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 

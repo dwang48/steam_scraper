@@ -24,7 +24,7 @@ from rest_framework import authentication, mixins, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from . import models, serializers, authentication as core_auth
+from . import models, serializers
 from .nsfw import NSFW_QUERY_TERMS
 
 User = get_user_model()
@@ -314,7 +314,7 @@ class AuthViewSet(viewsets.ViewSet):
     """Session-based authentication endpoints."""
 
     permission_classes = [permissions.AllowAny]
-    authentication_classes = [core_auth.CsrfExemptSessionAuthentication, authentication.BasicAuthentication]
+    authentication_classes = [authentication.SessionAuthentication, authentication.BasicAuthentication]
 
     def list(self, request):
         if request.user.is_authenticated:
@@ -469,7 +469,7 @@ class SwipeActionViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, viewset
 
     serializer_class = serializers.SwipeActionSerializer
     permission_classes = [permissions.IsAuthenticated]
-    authentication_classes = [core_auth.CsrfExemptSessionAuthentication, authentication.BasicAuthentication]
+    authentication_classes = [authentication.SessionAuthentication, authentication.BasicAuthentication]
 
     def get_queryset(self):
         qs = (
