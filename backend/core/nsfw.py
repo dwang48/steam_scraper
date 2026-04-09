@@ -114,9 +114,6 @@ def classify_nsfw_from_details(details: dict[str, Any] | None) -> tuple[bool, li
         return False, []
 
     content_descriptors = details.get("content_descriptors") or {}
-    descriptor_notes = ""
-    if isinstance(content_descriptors, dict):
-        descriptor_notes = content_descriptors.get("notes") or ""
 
     text_map = {
         "name": details.get("name"),
@@ -124,7 +121,8 @@ def classify_nsfw_from_details(details: dict[str, Any] | None) -> tuple[bool, li
         "detailed_description": details.get("detailed_description"),
         "genres": _extract_descriptions(details.get("genres") or []),
         "categories": _extract_descriptions(details.get("categories") or []),
-        "content_descriptors": descriptor_notes,
+        "store_tags": details.get("store_tags") or details.get("tags") or [],
+        "content_descriptors": content_descriptors,
     }
     reasons = detect_nsfw_reasons(text_map)
     return bool(reasons), reasons

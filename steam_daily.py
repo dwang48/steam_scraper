@@ -19,6 +19,7 @@ import random
 import html
 
 import requests
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -35,6 +36,7 @@ LEGACY_APPLIST_URLS = [
 ]
 STORE_APP_LIST_URL = "https://api.steampowered.com/IStoreService/GetAppList/v1/"
 DETAILS_URL_TEMPLATE = "https://store.steampowered.com/api/appdetails?appids={appid}&cc=us&l=en"
+STORE_PAGE_URL_TEMPLATE = "https://store.steampowered.com/app/{appid}/?cc=us&l=en"
 FOLLOWER_URL = "https://steamcommunity.com/games/{appid}/memberslistxml/?xml=1"
 STEAMDB_URL = "https://steamdb.info/app/{appid}/"
 DATA_DIR = Path(__file__).parent / "steam_data"
@@ -86,12 +88,14 @@ FIELDS = [
     "website",
     "categories",
     "genres",
+    "tags",
     "steam_url",
     "detection_stage",  # New field: "public_unreleased", "early_stage", "minimal_data"
     "api_response_type",  # New field: "full_details", "minimal_data", "no_response"
     "potential_duplicate",  # New field: indicates if this might be a duplicate/variant
     "release_date",       # New field: game release date
     "description",        # New field: game description for understanding gameplay
+    "content_descriptor_notes",
     "supported_languages", # New field: supported languages list
     "followers",          # New field: Steam community followers count
     "wishlists_est",      # New field: estimated wishlist count
@@ -284,11 +288,38 @@ def fetch_app_details(appid: int) -> Dict:
         
         details = data.get("data", {})
         if details:
+            details["store_tags"] = fetch_store_tags(appid)
             details["_api_response"] = "success"
         return details
     except Exception as e:
         # Capture network/parsing errors too
         return {"_api_response": "error", "_app_id": appid, "_error": str(e)}
+
+
+def fetch_store_tags(appid: int, session: requests.Session = None) -> List[str]:
+    """Fetch visible Steam store tags from the public app page."""
+    sess = session or requests.Session()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (SteamStoreTagBot/1.0)",
+        "Cookie": "birthtime=0; mature_content=1; wants_mature_content=1",
+    }
+    try:
+        resp = sess.get(STORE_PAGE_URL_TEMPLATE.format(appid=appid), headers=headers, timeout=15)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "lxml")
+        tags = []
+        for tag_el in soup.select(".glance_tags.popular_tags a.app_tag, .glance_tags.popular_tags .app_tag"):
+            tag_text = clean_text_content(tag_el.get_text(" ", strip=True))
+            if not tag_text or tag_text == "+":
+                continue
+            if tag_text not in tags:
+                tags.append(tag_text)
+            if len(";".join(tags)) >= 480 or len(tags) >= 12:
+                break
+        return tags
+    except Exception as exc:
+        logging.warning("Store tags fetch failed for %s: %s", appid, exc)
+        return []
 
 def fetch_follower_count(appid: int, session: requests.Session = None) -> Optional[int]:
     """获取Steam社区关注者数量"""
@@ -475,6 +506,13 @@ def get_game_details(appid: int, session: requests.Session) -> Dict:
             genres = []
             if game_data.get('genres'):
                 genres = [genre.get('description', '') for genre in game_data.get('genres', [])]
+
+            content_descriptor_notes = ""
+            content_descriptors = game_data.get("content_descriptors") or {}
+            if isinstance(content_descriptors, dict):
+                content_descriptor_notes = clean_text_content(content_descriptors.get("notes", ""))
+
+            store_tags = fetch_store_tags(appid, session)
             
             return {
                 'appid': appid,
@@ -486,7 +524,9 @@ def get_game_details(appid: int, session: requests.Session) -> Dict:
                 'publishers': publishers,
                 'categories': categories,
                 'genres': genres,
+                'tags': store_tags,
                 'website': game_data.get('website'),
+                'content_descriptor_notes': content_descriptor_notes,
                 'steam_url': f"https://store.steampowered.com/app/{appid}/",
                 'retrieved_at': datetime.now(timezone.utc).isoformat()
             }
@@ -505,6 +545,11 @@ def build_row(details: Dict, app_id: int = None, wishlist_data: Dict = None) -> 
     followers = wishlist_data.get("followers") if wishlist_data else None
     wishlists_est = wishlist_data.get("wishlists_est") if wishlist_data else None
     wishlist_rank = wishlist_data.get("wishlist_rank") if wishlist_data else None
+
+    content_descriptor_notes = ""
+    content_descriptors = details.get("content_descriptors") if details else {}
+    if isinstance(content_descriptors, dict):
+        content_descriptor_notes = clean_text_content(content_descriptors.get("notes", ""))
     
     # Handle new data structure from get_game_details
     if details and details.get('appid'):
@@ -518,12 +563,14 @@ def build_row(details: Dict, app_id: int = None, wishlist_data: Dict = None) -> 
             "website": details.get("website"),
             "categories": ";".join(details.get("categories", [])) if details.get("categories") else None,
             "genres": ";".join(details.get("genres", [])) if details.get("genres") else None,
+            "tags": ";".join(details.get("tags", [])) if details.get("tags") else None,
             "steam_url": details.get("steam_url", ""),
             "detection_stage": "public_unreleased",  # Assuming these are unreleased games
             "api_response_type": "full_details",
             "potential_duplicate": False,
             "release_date": details.get("release_date", "未知"),
             "description": details.get("description", ""),
+            "content_descriptor_notes": details.get("content_descriptor_notes", ""),
             "supported_languages": ";".join(details.get("supported_languages", [])) if details.get("supported_languages") else None,
             "followers": followers,
             "wishlists_est": wishlists_est,
@@ -542,12 +589,14 @@ def build_row(details: Dict, app_id: int = None, wishlist_data: Dict = None) -> 
             "website": None,
             "categories": None,
             "genres": None,
+            "tags": None,
             "steam_url": f"https://store.steampowered.com/app/{app_id or details.get('_app_id', '')}" if app_id or details.get('_app_id') else None,
             "detection_stage": "early_stage",
             "api_response_type": details.get("_api_response", "no_response"),
             "potential_duplicate": False,
             "release_date": "未知",
             "description": "",
+            "content_descriptor_notes": "",
             "supported_languages": None,
             "followers": followers,
             "wishlists_est": wishlists_est,
@@ -607,12 +656,14 @@ def build_row(details: Dict, app_id: int = None, wishlist_data: Dict = None) -> 
         "website": details.get("website"),
         "categories": ";".join(c.get("description") for c in details.get("categories", [])) if details.get("categories") else None,
         "genres": ";".join(g.get("description") for g in details.get("genres", [])) if details.get("genres") else None,
+        "tags": ";".join(details.get("store_tags", [])) if details.get("store_tags") else None,
         "steam_url": f"https://store.steampowered.com/app/{details.get('steam_appid', app_id or '')}" if details.get('steam_appid') or app_id else None,
         "detection_stage": detection_stage,
         "api_response_type": "full_details",
         "potential_duplicate": False,
         "release_date": release_date,
         "description": description,
+        "content_descriptor_notes": content_descriptor_notes,
         "supported_languages": ";".join(supported_languages) if supported_languages else None,
         "followers": followers,
         "wishlists_est": wishlists_est,
@@ -634,7 +685,7 @@ def export_csv(rows: List[Dict]) -> Path:
             for key, value in row.items():
                 if isinstance(value, str) and value:
                     # 对可能包含HTML实体的字段进行额外清理
-                    if key in ['name', 'description', 'developers', 'publishers', 'categories', 'genres']:
+                    if key in ['name', 'description', 'developers', 'publishers', 'categories', 'genres', 'tags', 'content_descriptor_notes']:
                         cleaned_row[key] = clean_text_content(value)
                     else:
                         cleaned_row[key] = value

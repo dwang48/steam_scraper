@@ -135,7 +135,7 @@ class Command(BaseCommand):
             game.publishers = row.get("publishers", game.publishers or "")
             game.categories = row.get("categories", game.categories or "")
             game.genres = row.get("genres", game.genres or "")
-            tag_value = row.get("target_tags_found") or row.get("tag_category") or game.tags or ""
+            tag_value = row.get("tags") or row.get("source_tags") or row.get("target_tags_found") or row.get("tag_category") or game.tags or ""
             game.tags = tag_value
             game.latest_release_date = row.get("release_date", game.latest_release_date or "")
             game.latest_detection_stage = row.get("detection_stage", game.latest_detection_stage or "")
@@ -167,7 +167,7 @@ class Command(BaseCommand):
                 "wishlist_rank": self._parse_int(row.get("wishlist_rank")),
                 "source_categories": row.get("categories", ""),
                 "source_genres": row.get("genres", ""),
-                "source_tags": row.get("target_tags_found", ""),
+                "source_tags": row.get("tags") or row.get("source_tags") or row.get("target_tags_found", ""),
                 "raw_payload": row,
             }
 
