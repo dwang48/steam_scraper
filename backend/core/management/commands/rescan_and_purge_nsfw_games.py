@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import html
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any
@@ -24,6 +25,7 @@ STORE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (SteamNSFWRescan/1.0)",
     "Cookie": "birthtime=0; mature_content=1; wants_mature_content=1",
 }
+MAX_RETRIES = 3
 
 
 @dataclass
@@ -47,47 +49,58 @@ def _unique(items: list[str]) -> list[str]:
     return list(dict.fromkeys(item for item in items if item))
 
 
+def _request_with_retries(url: str, timeout: int) -> tuple[requests.Response | None, str | None]:
+    last_error: str | None = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            response = requests.get(url, headers=STORE_HEADERS, timeout=timeout)
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
+                wait_seconds = int(retry_after) if retry_after and retry_after.isdigit() else attempt * 2
+                last_error = f"429 Too Many Requests (attempt {attempt}/{MAX_RETRIES}, waited {wait_seconds}s)"
+                if attempt < MAX_RETRIES:
+                    time.sleep(wait_seconds)
+                    continue
+            response.raise_for_status()
+            return response, None
+        except Exception as exc:
+            last_error = str(exc)
+            if attempt < MAX_RETRIES:
+                time.sleep(attempt)
+    return None, last_error
+
+
 def _fetch_store_tags(appid: int, timeout: int) -> tuple[list[str], str | None]:
-    try:
-        response = requests.get(
-            STORE_PAGE_URL_TEMPLATE.format(appid=appid),
-            headers=STORE_HEADERS,
-            timeout=timeout,
-        )
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "lxml")
-        tags: list[str] = []
-        for tag_el in soup.select(".glance_tags.popular_tags a.app_tag, .glance_tags.popular_tags .app_tag"):
-            tag_text = _clean_text(tag_el.get_text(" ", strip=True))
-            if not tag_text or tag_text == "+":
-                continue
-            if tag_text not in tags:
-                tags.append(tag_text)
-            if len(";".join(tags)) >= 480 or len(tags) >= 12:
-                break
-        return tags, ""
-    except Exception as exc:
-        return [], f"store_tags={exc}"
+    response, error = _request_with_retries(STORE_PAGE_URL_TEMPLATE.format(appid=appid), timeout=timeout)
+    if error or response is None:
+        return [], f"store_tags={error}"
+
+    soup = BeautifulSoup(response.text, "lxml")
+    tags: list[str] = []
+    for tag_el in soup.select(".glance_tags.popular_tags a.app_tag, .glance_tags.popular_tags .app_tag"):
+        tag_text = _clean_text(tag_el.get_text(" ", strip=True))
+        if not tag_text or tag_text == "+":
+            continue
+        if tag_text not in tags:
+            tags.append(tag_text)
+        if len(";".join(tags)) >= 480 or len(tags) >= 12:
+            break
+    return tags, ""
 
 
 def _fetch_live_details(appid: int, timeout: int) -> tuple[dict[str, Any], list[str]]:
     details: dict[str, Any] = {}
     errors: list[str] = []
 
-    try:
-        response = requests.get(
-            DETAILS_URL_TEMPLATE.format(appid=appid),
-            headers=STORE_HEADERS,
-            timeout=timeout,
-        )
-        response.raise_for_status()
+    response, error = _request_with_retries(DETAILS_URL_TEMPLATE.format(appid=appid), timeout=timeout)
+    if response is not None:
         payload = response.json().get(str(appid), {})
         if payload.get("success") and isinstance(payload.get("data"), dict):
             details = payload["data"]
         else:
             errors.append("appdetails=unsuccessful")
-    except Exception as exc:
-        errors.append(f"appdetails={exc}")
+    elif error:
+        errors.append(f"appdetails={error}")
 
     store_tags, tag_error = _fetch_store_tags(appid, timeout=timeout)
     if tag_error:
@@ -132,8 +145,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--max-workers",
             type=int,
-            default=4,
-            help="Number of concurrent Steam metadata fetch workers. Default: 4.",
+            default=2,
+            help="Number of concurrent Steam metadata fetch workers. Default: 2.",
         )
         parser.add_argument(
             "--timeout",

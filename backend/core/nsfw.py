@@ -9,9 +9,8 @@ import re
 from typing import Any, Iterable
 
 NSFW_QUERY_TERMS = (
-    "adult",
+    "adult only",
     "sexual",
-    "sex",
     "porn",
     "hentai",
     "xxx",
@@ -30,6 +29,8 @@ NSFW_QUERY_TERMS = (
     "incest",
     "milf",
 )
+
+_WEAK_REASON_LABELS = {"adult", "mature sexual"}
 
 _NSFW_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("adult only", re.compile(r"\badult(?:s)?\s+only\b", re.IGNORECASE)),
@@ -97,15 +98,45 @@ def _dedupe(items: Iterable[str]) -> list[str]:
     return ordered
 
 
+def _normalize_field_reasons(reasons: list[str]) -> list[str]:
+    labels = {reason.split(":", 1)[1] for reason in reasons if ":" in reason}
+    normalized = list(reasons)
+
+    if "adult only" in labels:
+        normalized = [reason for reason in normalized if not reason.endswith(":adult")]
+    if "explicit sexual" in labels:
+        normalized = [reason for reason in normalized if not (reason.endswith(":sexual") or reason.endswith(":sex"))]
+    if "mature sexual" in labels:
+        normalized = [reason for reason in normalized if not (reason.endswith(":sexual") or reason.endswith(":sex"))]
+    elif "sexual" in labels:
+        normalized = [reason for reason in normalized if not reason.endswith(":sex")]
+
+    return normalized
+
+
+def _is_nsfw_from_reasons(reasons: list[str]) -> bool:
+    if not reasons:
+        return False
+
+    labels = {reason.split(":", 1)[1] for reason in reasons if ":" in reason}
+    strong_labels = labels - _WEAK_REASON_LABELS
+    if strong_labels:
+        return True
+
+    return len(labels & _WEAK_REASON_LABELS) >= 2
+
+
 def detect_nsfw_reasons(text_map: dict[str, Any]) -> list[str]:
     reasons: list[str] = []
     for field, raw_value in text_map.items():
         text = _clean_text(raw_value)
         if not text:
             continue
+        field_reasons: list[str] = []
         for label, pattern in _NSFW_RULES:
             if pattern.search(text):
-                reasons.append(f"{field}:{label}")
+                field_reasons.append(f"{field}:{label}")
+        reasons.extend(_normalize_field_reasons(field_reasons))
     return _dedupe(reasons)
 
 
@@ -125,7 +156,7 @@ def classify_nsfw_from_details(details: dict[str, Any] | None) -> tuple[bool, li
         "content_descriptors": content_descriptors,
     }
     reasons = detect_nsfw_reasons(text_map)
-    return bool(reasons), reasons
+    return _is_nsfw_from_reasons(reasons), reasons
 
 
 def classify_nsfw_from_row(row: dict[str, Any] | None) -> tuple[bool, list[str]]:
@@ -141,7 +172,7 @@ def classify_nsfw_from_row(row: dict[str, Any] | None) -> tuple[bool, list[str]]
         "nsfw_notes": row.get("content_descriptors") or row.get("content_descriptor_notes"),
     }
     reasons = detect_nsfw_reasons(text_map)
-    return bool(reasons), reasons
+    return _is_nsfw_from_reasons(reasons), reasons
 
 
 def classify_nsfw_game_bundle(game: Any, snapshots: Iterable[Any]) -> tuple[bool, list[str]]:
