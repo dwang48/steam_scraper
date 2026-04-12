@@ -10,6 +10,8 @@ from typing import Any, Iterable
 
 NSFW_QUERY_TERMS = (
     "adult only",
+    "adult content",
+    "sexual content",
     "sexual",
     "porn",
     "hentai",
@@ -34,9 +36,11 @@ _WEAK_REASON_LABELS = {"adult", "mature sexual"}
 
 _NSFW_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("adult only", re.compile(r"\badult(?:s)?\s+only\b", re.IGNORECASE)),
+    ("adult content", re.compile(r"\badult(?:s)?\s+content\b", re.IGNORECASE)),
     ("adult", re.compile(r"\badult(?:s)?\b", re.IGNORECASE)),
     ("mature sexual", re.compile(r"\bmature\s+(?:sexual|adult|erotic|explicit|content|themes?)\b", re.IGNORECASE)),
     ("explicit sexual", re.compile(r"\bexplicit\s+(?:sexual|erotic|adult)\b", re.IGNORECASE)),
+    ("sexual content", re.compile(r"\bsexual\s+content\b", re.IGNORECASE)),
     ("sexual", re.compile(r"\bsexual(?:\s+content|\s+themes?)?\b", re.IGNORECASE)),
     ("sex", re.compile(r"\bsex\w*\b", re.IGNORECASE)),
     ("porn", re.compile(r"\bporn\w*\b", re.IGNORECASE)),
@@ -104,7 +108,11 @@ def _normalize_field_reasons(reasons: list[str]) -> list[str]:
 
     if "adult only" in labels:
         normalized = [reason for reason in normalized if not reason.endswith(":adult")]
+    if "adult content" in labels:
+        normalized = [reason for reason in normalized if not reason.endswith(":adult")]
     if "explicit sexual" in labels:
+        normalized = [reason for reason in normalized if not (reason.endswith(":sexual") or reason.endswith(":sex"))]
+    if "sexual content" in labels:
         normalized = [reason for reason in normalized if not (reason.endswith(":sexual") or reason.endswith(":sex"))]
     if "mature sexual" in labels:
         normalized = [reason for reason in normalized if not (reason.endswith(":sexual") or reason.endswith(":sex"))]

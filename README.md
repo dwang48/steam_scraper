@@ -327,6 +327,124 @@ Important frontend variables:
 - Self-registration creates inactive users. An admin must approve them before sign-in succeeds.
 - `game_ai.py` is optional and currently not exposed by the API or UI.
 
+## Server Setup And Deployment
+
+This section documents the current EC2 deployment layout and the recovery steps validated on April 8, 2026.
+
+### Current production layout
+
+- Repository path: `/home/ec2-user/steam_scraper`
+- Python virtualenv: `/home/ec2-user/steam_scraper/venv`
+- Django app process: `gunicorn.service`
+- Reverse proxy and static serving: `nginx.service`
+- Frontend publish directory served by nginx: `/var/www/steam-frontend`
+- Django static alias in nginx: `/home/ec2-user/steam_scraper/backend/staticfiles/`
+- Django media alias in nginx: `/home/ec2-user/steam_scraper/backend/media/`
+
+Current scheduled sync job:
+
+```bash
+crontab -l
+40 16 * * * /home/ec2-user/steam_scraper/scripts/daily_sync.sh
+```
+
+### Root environment file
+
+Django reads `.env` from the repository root, not from `backend/` and not from `backend/steam_selection/`.
+
+```env
+DJANGO_SECRET_KEY=replace-with-a-real-secret
+DJANGO_DEBUG=False
+DJANGO_ALLOWED_HOSTS=34.235.149.243,127.0.0.1,localhost,ec2-34-235-149-243.compute-1.amazonaws.com
+DATABASE_URL=sqlite:////home/ec2-user/steam_scraper/backend/db.sqlite3
+CORS_ALLOWED_ORIGINS=http://34.235.149.243
+CSRF_TRUSTED_ORIGINS=http://34.235.149.243
+USE_HTTPS=False
+```
+
+If the site moves to HTTPS or a real domain, update `DJANGO_ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, and `CSRF_TRUSTED_ORIGINS`, then set `USE_HTTPS=True`.
+
+### Runtime data and safe git updates
+
+The server keeps live runtime data that should not be overwritten during a normal deploy:
+
+- `backend/db.sqlite3`
+- `logs/`
+- `steam_data/applist.json`
+- `steam_data/early_stage_watchlist.json`
+
+Before pulling new code, make a filesystem backup of those files.
+
+`backend/db.sqlite3` and `logs/` should be ignored only on the server via `.git/info/exclude`:
+
+```bash
+GIT_DIR=$(git rev-parse --git-dir)
+mkdir -p "$GIT_DIR/info"
+cat >> "$GIT_DIR/info/exclude" <<'EOF'
+logs/
+*.pid
+nohup.out
+backend/db.sqlite3
+EOF
+```
+
+`steam_data/applist.json` and `steam_data/early_stage_watchlist.json` are still tracked by Git in this repository, so an ignore rule alone is not enough. On the server, mark them as locally managed until those files are moved fully out of version control:
+
+```bash
+git update-index --skip-worktree steam_data/applist.json steam_data/early_stage_watchlist.json
+```
+
+To let Git manage them again:
+
+```bash
+git update-index --no-skip-worktree steam_data/applist.json steam_data/early_stage_watchlist.json
+```
+
+### Backend deploy after `git pull`
+
+```bash
+cd /home/ec2-user/steam_scraper
+source venv/bin/activate
+git pull --rebase origin main
+pip install -r requirements.txt
+
+cd backend
+python manage.py migrate
+python manage.py check
+python manage.py collectstatic --noinput
+cd ..
+
+sudo systemctl restart gunicorn
+sudo systemctl status gunicorn --no-pager -l
+sudo journalctl -u gunicorn -n 100 --no-pager
+```
+
+Quick verification:
+
+```bash
+curl -I http://127.0.0.1/
+curl -i http://127.0.0.1/api/health/
+```
+
+### Frontend deploy
+
+The frontend does not need redeployment if only backend code or crawler logic changed. Rebuild and publish only when files under `frontend/` changed or when `frontend/.env` changed.
+
+```bash
+cd /home/ec2-user/steam_scraper/frontend
+npm install
+npm run build
+sudo rsync -a --delete dist/ /var/www/steam-frontend/
+```
+
+### Troubleshooting
+
+- `DisallowedHost`: update `DJANGO_ALLOWED_HOSTS` in the repository root `.env`, then restart `gunicorn`.
+- `unable to open database file`: check that `DATABASE_URL` uses the absolute SQLite path `sqlite:////home/ec2-user/steam_scraper/backend/db.sqlite3`.
+- If `python manage.py shell -c "from django.conf import settings; print(settings.DATABASES['default'])"` shows `'/backend/db.sqlite3'`, the `.env` value is still wrong.
+- If a `.env` file is created under `backend/steam_selection/`, move it back to `/home/ec2-user/steam_scraper/.env`.
+- `nginx: [warn] conflicting server name "_" on 0.0.0.0:80, ignored` did not block application startup, but duplicate default server blocks should be cleaned up later.
+
 ## Known Gaps
 
 - There is no formal CI pipeline in the repository yet.
